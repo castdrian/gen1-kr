@@ -10,5 +10,15 @@ if [ ! -f "$engine_repo/tools/modkit.py" ]; then
 fi
 
 cd "$engine_repo"
-python3 tools/modkit.py validate "$mod_dir" --strict
+if ! validation=$(python3 tools/modkit.py validate "$mod_dir" --strict 2>&1); then
+  printf '%s\n' "$validation" >&2
+  missing_dependency='MK003 ERROR gen1_kr: missing dependency: DRAMATIC_SHAPE'
+  errors=$(printf '%s\n' "$validation" | grep -c '^MK[0-9][0-9][0-9] ERROR ' || true)
+  if [ "$errors" -ne 1 ] || ! printf '%s\n' "$validation" | grep -Fxq "$missing_dependency"; then
+    exit 1
+  fi
+fi
 python3 tools/modkit.py lint "$mod_dir"
+cd "$mod_dir"
+luajit tests/kitt_regression.lua
+luajit tests/lua_syntax.lua

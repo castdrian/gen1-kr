@@ -100,8 +100,6 @@ jobs:
           mkdir -p "$staging" "$out"
           git archive HEAD | tar -x -C "$staging"
           rm -rf "$staging/.github" "$staging/.git" "$staging/.gitignore"
-          python3 tools/build_bundled_voxel.py "$GITHUB_WORKSPACE/third_party/DramaticShapeVoxelMod" "$staging"
-          rm -rf "$staging/third_party"
           python3 - "$staging/manifest.json" "$VERSION" <<'PY'
           import json
           import sys

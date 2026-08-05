@@ -1,6 +1,5 @@
 local MOD_ID = "gen1_kr"
 local SPRITE_ID = "GEN1_KR_KITT"
-local VOXEL_MODEL_ID = "GEN1_KR_KITT_VOXEL"
 
 local MUSIC = {
   Original = { id = "Music_Gen1KR_Original", file = "audio/original.ogg" },
@@ -13,9 +12,16 @@ local ENGINE_FILES = {
 }
 local SCANNER_FILE = "audio/scanner.ogg"
 local WILHELM_FILE = "audio/wilhelm.ogg"
-local IMPACT_FILE = "audio/impact.ogg"
+local CRASH_FILE = "audio/car_crash.ogg"
+local CRASH_IMPACT_OFFSET = 1.66
+local CRASH_PRE_ROLL = 0.75
 local TURBO_FILE = "audio/turbo.ogg"
-local COLLISION_RADIUS = 44
+local SKI_FILE = "audio/ski_mode.ogg"
+local POWER_UP_FILE = "audio/power_up.ogg"
+local POWER_DOWN_FILE = "audio/power_down.ogg"
+local COLLISION_RADIUS = 22
+local COLLISION_HALF_WIDTH = 7
+local VEHICLE_BUMPER_REACH = 7
 local VOXEL_LEVEL = 4
 local MODEL_FILES = {
   Original = "assets/kitt_model.lua",
@@ -35,26 +41,19 @@ local SCANNER_LIGHT_FILES = {
   "assets/scanner_medium.png",
   "assets/scanner_bright.png",
 }
+local CAR_ICON_FILES = {
+  Original = "assets/kitt-2000-icon.png",
+  KR2008 = "assets/kitt-3000-icon.png",
+}
+local SKI_ICON_FILE = "assets/ski-mode-icon.png"
+local SPEED_MULTIPLIERS = {
+  SLOW = 0.52,
+  NORMAL = 0.42,
+  FAST = 0.34,
+}
+local SPEED_CHOICES = { "SLOW", "NORMAL", "FAST" }
 
 return function(mod)
-  local function loadBundledVoxel()
-    local raw = mod:read("voxel_main.lua")
-    if not raw then return nil end
-    local loaded, chunk = pcall(load, raw, "@" .. mod.path .. "/voxel_main.lua")
-    if not loaded or not chunk then
-      mod.log:warn("bundled voxel renderer failed to compile: %s", tostring(chunk))
-      return nil
-    end
-    local started, result = pcall(chunk, mod)
-    if not started then
-      mod.log:warn("bundled voxel renderer failed to load: %s", tostring(result))
-      return nil
-    end
-    return result
-  end
-
-  local bundledVoxel = loadBundledVoxel()
-  local VoxelScene = bundledVoxel and bundledVoxel.VoxelScene
   local Game = require("src.core.Game")
   local Collision = require("src.world.Collision")
   local Map = require("src.world.Map")
@@ -62,6 +61,12 @@ return function(mod)
   local Player = require("src.world.Player")
   local SpriteRenderer = require("src.render.SpriteRenderer")
   local Pipelines = require("src.render.Pipelines")
+  local externalVoxel = mod:find("DRAMATIC_SHAPE")
+  local VoxelScene
+  local Voxel3D
+  local VoxelState
+  local Mat4
+  local ShadowMap
 
   mod.content.sprites:register(SPRITE_ID, {
     image = mod.assets:path("assets/kitt.png"),
@@ -96,6 +101,12 @@ return function(mod)
       default = true,
     },
     {
+      key = "kitt",
+      label = "K.I.T.T.",
+      type = "toggle",
+      default = false,
+    },
+    {
       key = "audio",
       label = "MODE",
       type = "choice",
@@ -104,6 +115,23 @@ return function(mod)
         { "Original", "Original" },
         { "KR2008", "KR2008" },
       },
+    },
+    {
+      key = "speed",
+      label = "SPEED",
+      type = "choice",
+      default = "NORMAL",
+      choices = {
+        { "SLOW", "SLOW" },
+        { "NORMAL", "NORMAL" },
+        { "FAST", "FAST" },
+      },
+    },
+    {
+      key = "skiMode",
+      label = "SKI MODE",
+      type = "toggle",
+      default = false,
     },
     {
       key = "impactCollision",
@@ -126,7 +154,65 @@ return function(mod)
 
   local function optionValue(key, default)
     local value = mod.options:get(key)
-    return value == nil and default or value
+    value = value == nil and default or value
+    if key == "audio" and value == "KR2009" then
+      return "KR2008"
+    end
+    return value
+  end
+
+  local function kittEnabled()
+    return optionValue("kitt", false)
+  end
+
+  local powerDownVisible = false
+
+  local function kittVisible()
+    return kittEnabled() or powerDownVisible
+  end
+
+  local skiState = { amount = 0 }
+
+  local function skiEnabled()
+    return kittEnabled() and optionValue("skiMode", false)
+  end
+
+  local function vehicleSpeed()
+    return SPEED_MULTIPLIERS[optionValue("speed", "NORMAL")]
+        or SPEED_MULTIPLIERS.NORMAL
+  end
+
+  local function updateSkiState(dt)
+    local target = skiEnabled() and 1 or 0
+    local amount = skiState.amount
+    local step = math.max(0, math.min(1, (dt or 1 / 60) * 5.5))
+    skiState.amount = amount + (target - amount) * step
+  end
+
+  local function loadExternalVoxel()
+    if VoxelScene and Voxel3D and VoxelState and Mat4 and ShadowMap then
+      return true
+    end
+    local exports = externalVoxel and externalVoxel.exports
+    local lib = exports and exports.lib
+    if type(lib) ~= "table" or type(lib.require) ~= "function" then
+      mod.log:warn("Dramatic Shape exports are unavailable")
+      return false
+    end
+    local function loadModule(name)
+      local ok, value = pcall(lib.require, name)
+      return ok and value or nil
+    end
+    VoxelScene = loadModule("VoxelScene")
+    Voxel3D = loadModule("Voxel3D")
+    VoxelState = loadModule("VoxelState")
+    Mat4 = loadModule("Mat4")
+    ShadowMap = loadModule("ShadowMap")
+    if not (VoxelScene and Voxel3D and VoxelState and Mat4 and ShadowMap) then
+      mod.log:warn("Dramatic Shape does not provide the required voxel modules")
+      return false
+    end
+    return true
   end
 
   local function setOption(game, key, value)
@@ -178,11 +264,26 @@ return function(mod)
       if key == "threeD" then setVoxelMode(game_, not enabled) end
       return true
     end
+    local function cycleChoice(game_, key, choices, default)
+      local current = optionValue(key, default)
+      local index = 1
+      for i, value in ipairs(choices) do
+        if value == current then index = i break end
+      end
+      setOption(game_, key, choices[index % #choices + 1])
+      return true
+    end
     filtered[#filtered + 1] = {
       id = MOD_ID .. ":threeD",
       label = "3D MODE",
       value = function() return optionValue("threeD", true) and "ON" or "OFF" end,
       step = function(game_) return cycleBoolean(game_, "threeD", true) end,
+    }
+    filtered[#filtered + 1] = {
+      id = MOD_ID .. ":kitt",
+      label = "K.I.T.T.",
+      value = function() return optionValue("kitt", false) and "ON" or "OFF" end,
+      step = function(game_) return cycleBoolean(game_, "kitt", false) end,
     }
     filtered[#filtered + 1] = {
       id = MOD_ID .. ":audio",
@@ -196,6 +297,20 @@ return function(mod)
       end,
     }
     filtered[#filtered + 1] = {
+      id = MOD_ID .. ":speed",
+      label = "SPEED",
+      value = function() return optionValue("speed", "NORMAL") end,
+      step = function(game_)
+        return cycleChoice(game_, "speed", SPEED_CHOICES, "NORMAL")
+      end,
+    }
+    filtered[#filtered + 1] = {
+      id = MOD_ID .. ":skiMode",
+      label = "SKI MODE",
+      value = function() return optionValue("skiMode", false) and "ON" or "OFF" end,
+      step = function(game_) return cycleBoolean(game_, "skiMode", false) end,
+    }
+    filtered[#filtered + 1] = {
       id = MOD_ID .. ":impactCollision",
       label = "COLLISION",
       value = function() return optionValue("impactCollision", true) and "ON" or "OFF" end,
@@ -205,6 +320,21 @@ return function(mod)
   end
 
   mod.hooks:wrap("ui.options.rows", optionRows, 1000)
+
+  mod.hooks:wrap("ui.start_menu.items", function(next, game, items)
+    local out = next(game, items)
+    if type(out) ~= "table" then return out end
+    local item = {
+      label = kittEnabled() and "KITT ON" or "KITT OFF",
+      keepOpen = true,
+    }
+    item.onSelect = function()
+      local enabled = not optionValue("kitt", false)
+      setOption(game, "kitt", enabled)
+      item.label = enabled and "KITT ON" or "KITT OFF"
+    end
+    return mod.ui.insertBefore(out, "OPTION", item)
+  end, 1000)
 
   local voxelModels = {}
 
@@ -239,6 +369,39 @@ return function(mod)
 
   local function createScannerMesh(ctx)
     local halfWidth, halfHeight, halfDepth = 0.6, 0.25, 0.07
+    local vertices = {}
+    local function vertex(x, y, z, u, v)
+      return { x, y, z, u, v, 1 }
+    end
+    local function face(a, b, c, d)
+      vertices[#vertices + 1] = a
+      vertices[#vertices + 1] = b
+      vertices[#vertices + 1] = c
+      vertices[#vertices + 1] = a
+      vertices[#vertices + 1] = c
+      vertices[#vertices + 1] = d
+    end
+    local left, right = -halfWidth, halfWidth
+    local bottom, top = -halfHeight, halfHeight
+    local back, front = -halfDepth, halfDepth
+    face(vertex(left, bottom, front, 0, 0), vertex(right, bottom, front, 1, 0),
+         vertex(right, top, front, 1, 1), vertex(left, top, front, 0, 1))
+    face(vertex(right, bottom, back, 0, 0), vertex(left, bottom, back, 1, 0),
+         vertex(left, top, back, 1, 1), vertex(right, top, back, 0, 1))
+    face(vertex(left, top, front, 0, 0), vertex(right, top, front, 1, 0),
+         vertex(right, top, back, 1, 1), vertex(left, top, back, 0, 1))
+    face(vertex(left, bottom, back, 0, 0), vertex(right, bottom, back, 1, 0),
+         vertex(right, bottom, front, 1, 1), vertex(left, bottom, front, 0, 1))
+    face(vertex(left, bottom, back, 0, 0), vertex(left, bottom, front, 1, 0),
+         vertex(left, top, front, 1, 1), vertex(left, top, back, 0, 1))
+    face(vertex(right, bottom, front, 0, 0), vertex(right, bottom, back, 1, 0),
+         vertex(right, top, back, 1, 1), vertex(right, top, front, 0, 1))
+    local ok, mesh = pcall(ctx.newMesh, vertices, nil)
+    return ok and mesh or nil
+  end
+
+  local function createSkiMesh(ctx)
+    local halfWidth, halfHeight, halfDepth = 0.48, 0.18, 17.5
     local vertices = {}
     local function vertex(x, y, z, u, v)
       return { x, y, z, u, v, 1 }
@@ -340,6 +503,7 @@ return function(mod)
           center = wheel.center,
           mesh = wheelMesh,
           heightScale = mode == "KR2008" and 1.3767 or 1,
+          inset = mode == "KR2008" and 0.88 or 1,
         }
       end
     end
@@ -363,12 +527,20 @@ return function(mod)
       scannerMesh = #scannerLightTextures == #SCANNER_LIGHT_FILES
           and createScannerMesh(ctx) or nil,
       scannerLightTextures = scannerLightTextures,
+      skiMesh = createSkiMesh(ctx),
       wheels = wheels,
       scannerFrame = nil,
       wheelAngle = 0,
       wheelClock = nil,
       wheelFrame = nil,
     }
+    local skiTextureOk, skiTexture = pcall(love.graphics.newImage,
+                                            mod.assets:path("assets/ski_palette.png"))
+    if skiTextureOk and skiTexture then
+      pcall(skiTexture.setFilter, skiTexture, "nearest", "nearest")
+      pcall(skiTexture.setWrap, skiTexture, "clamp", "clamp")
+      model.skiTexture = skiTexture
+    end
     voxelModels[mode] = model
     return model
   end
@@ -400,24 +572,41 @@ return function(mod)
     model.texture = model.scannerTextures[frame % #model.scannerTextures + 1]
   end
 
+  local function rotateZ(angle)
+    local c, s = math.cos(angle), math.sin(angle)
+    return { c, -s, 0, 0,
+             s, c, 0, 0,
+             0, 0, 1, 0,
+             0, 0, 0, 1 }
+  end
+
+  local function skiTransform(m)
+    if skiState.amount < 0.001 then return m.identity() end
+    local pivotX, pivotY = -7.1, 2.5
+    return m.mul(m.translate(pivotX, pivotY, 0),
+      m.mul(rotateZ(skiState.amount * 1.18),
+            m.translate(-pivotX, -pivotY, 0)))
+  end
+
   local function voxelModelMatrix(ctx)
+    local facing = ctx.bodyFacing or ctx.facing
     local yaw = ({
       down = 0,
       up = math.pi,
       right = math.pi / 2,
       left = -math.pi / 2,
-    })[ctx.facing] or 0
+    })[facing] or 0
     local m = ctx.mat4
     return m.mul(
       m.translate(ctx.px + 8, ctx.ground + ctx.lift, ctx.py + 8),
-      m.rotateY(yaw))
+      m.mul(m.rotateY(yaw), skiTransform(m)))
   end
 
   local function voxelWheelMatrix(ctx, wheel)
     local m = ctx.mat4
     return m.mul(
       voxelModelMatrix(ctx),
-      m.mul(m.translate(wheel.center[1], wheel.center[2], wheel.center[3]),
+      m.mul(m.translate(wheel.center[1] * (wheel.inset or 1), wheel.center[2], wheel.center[3]),
             m.mul(m.rotateX(wheel.angle or 0),
                   m.scale(1, wheel.heightScale or 1, 1))))
   end
@@ -466,6 +655,23 @@ return function(mod)
     if flatten then flatten() end
   end
 
+  local function drawSkiRails(ctx, model, matrix)
+    if skiState.amount < 0.02 or not model.skiMesh or not model.skiTexture then
+      return
+    end
+    local m = ctx.mat4
+    for _, x in ipairs({ -5.7, 5.7 }) do
+      local railMatrix = m.mul(matrix,
+        m.mul(m.translate(x, -2.3, 0), m.scale(1, 1, skiState.amount)))
+      if ctx.pass == "shadow" then
+        ctx.shadow(model.skiMesh, model.skiTexture, railMatrix)
+      else
+        ctx.draw(model.skiMesh, model.skiTexture, railMatrix,
+                 ctx.pass == "ghost" and 0 or ctx.pull, railMatrix)
+      end
+    end
+  end
+
   local drawExplosions
 
   local function drawVoxelModel(ctx)
@@ -505,25 +711,6 @@ return function(mod)
     return true
   end
 
-  local voxelRegistration
-  local function installVoxelModel()
-    if voxelRegistration then return end
-    if VoxelScene then
-      voxelRegistration = VoxelScene.registerEntityModel(
-        VOXEL_MODEL_ID, drawVoxelModel, 1000)
-      return
-    end
-    local external = mod:find("DRAMATIC_SHAPE")
-    local exports = external and external.exports
-    if exports and exports.registerEntityModel then
-      voxelRegistration = exports.registerEntityModel(
-        VOXEL_MODEL_ID, drawVoxelModel, 1000)
-    end
-  end
-
-  mod.events:on("mods.loaded", installVoxelModel)
-  installVoxelModel()
-
   local vanillaPose = Player.__gen1KrVanillaPose or Player.pose
   Player.__gen1KrVanillaPose = vanillaPose
   local vanillaUpdate = Player.__gen1KrVanillaUpdate or Player.update
@@ -538,20 +725,60 @@ return function(mod)
     request = nil,
   }
   local clearTurbo
+  local function vehicleHitbox(map, cellX, cellY, direction)
+    local delta = Collision.DELTA[direction]
+    if not delta then return false end
+    local centerX, centerY = cellX * 16 + 8, cellY * 16 + 8
+    for _, distance in ipairs({ -VEHICLE_BUMPER_REACH, VEHICLE_BUMPER_REACH }) do
+      local px = centerX + delta[1] * distance
+      local py = centerY + delta[2] * distance
+      local x, y = math.floor(px / 16), math.floor(py / 16)
+      if not map:inBounds(x, y) or map:isWaterCell(x, y)
+          or not map:isWalkableCell(x, y) then
+        return false
+      end
+    end
+    return true
+  end
 
-  local function isOutdoorPlayer(player)
+  local function isOutdoorKittVisible(player)
     local overworld = Game.overworld
-    return overworld and overworld.player == player and overworld.map
+    return kittVisible() and overworld and overworld.player == player and overworld.map
        and Map.isOutdoor(overworld.map.def)
        and not player.surfing and not player.fishing
+  end
+
+  local function isOutdoorPlayer(player)
+    return kittEnabled() and isOutdoorKittVisible(player)
   end
 
   mod.hooks:wrap("movement.speed", function(next, frames, ctx)
     local value = next(frames, ctx)
     if ctx and ctx.player and isOutdoorPlayer(ctx.player) then
-      return math.max(1, math.floor(value * 0.5))
+      return math.max(1, math.floor(value * vehicleSpeed()))
     end
     return value
+  end, 1000)
+
+  mod.hooks:wrap("movement.collision", function(next, allowed, ctx)
+    local result = next(allowed, ctx)
+    local player = ctx and ctx.mover
+    local map = ctx and ctx.map
+    if not (player and map and isOutdoorPlayer(player)) then return result end
+    if player.__gen1KrTerrainRecovery then
+      if map:isWaterCell(ctx.toX, ctx.toY) then return false end
+      if map:isWalkableCell(ctx.toX, ctx.toY) then
+        player.__gen1KrTerrainRecovery = nil
+      end
+      if ctx.reason == "tile" then return true end
+      return result
+    end
+    if not result then return false end
+    if not vehicleHitbox(map, ctx.toX, ctx.toY, ctx.dir) then
+      ctx.reason = "vehicle"
+      return false
+    end
+    return true
   end, 1000)
 
   local function kittSprite(player)
@@ -564,9 +791,134 @@ return function(mod)
     return sprite
   end
 
+  local externalVoxelInstalled = false
+  local rawShadowDraw
+
+  local function kittSpriteDef(sprite)
+    return sprite and sprite.def and sprite.def.image == mod.path .. "/assets/kitt.png"
+  end
+
+  local function externalContext(pass, sprite, px, py, facing, phase, flip,
+                                 ground, colors, lift, moving)
+    local player = Game.overworld and Game.overworld.player
+    local bodyFacing = kittSpriteDef(sprite) and player and player.facing or facing
+    local angle = VoxelState and VoxelState.angle or 0.05
+    return {
+      pass = pass,
+      sprite = sprite,
+      def = sprite and sprite.def,
+      px = px,
+      py = py,
+      facing = facing,
+      bodyFacing = bodyFacing or facing,
+      phase = phase,
+      flip = flip,
+      ground = ground or 0,
+      colors = colors,
+      lift = lift or 0,
+      moving = moving and true or false,
+      voxel = Voxel3D,
+      mat4 = Mat4,
+      newMesh = Voxel3D.newMesh,
+      draw = Voxel3D.draw,
+      shadow = rawShadowDraw or ShadowMap.draw,
+      pull = VoxelScene.pull(math.max(angle or 0.05, 0.05)),
+    }
+  end
+
+  local function replaceUpvalue(callback, name, value)
+    if not (debug and debug.getupvalue and debug.setupvalue) then return nil end
+    for index = 1, math.huge do
+      local current, previous = debug.getupvalue(callback, index)
+      if not current then return nil end
+      if current == name then
+        debug.setupvalue(callback, index, value)
+        return previous
+      end
+    end
+  end
+
+  local function findUpvalue(callback, name)
+    if not (debug and debug.getupvalue) then return nil end
+    for index = 1, math.huge do
+      local current, value = debug.getupvalue(callback, index)
+      if not current then return nil end
+      if current == name then return value end
+    end
+  end
+
+  local originalDrawEntity
+  local originalDrawGhost
+  local originalDrawShadow
+
+  local function drawExternalEntity(sprite, px, py, facing, phase, flip, ground,
+                                    colors, lift)
+    if kittVisible() and kittSpriteDef(sprite) then
+      local player = Game.overworld and Game.overworld.player
+      local context = externalContext("scene", sprite, px, py, facing, phase,
+        flip, ground, colors, lift, player and player.moving)
+      if drawVoxelModel(context) then return true end
+    end
+    return originalDrawEntity(sprite, px, py, facing, phase, flip, ground,
+                              colors, lift)
+  end
+
+  local function drawExternalGhost(pose)
+    if kittVisible() and kittSpriteDef(pose and pose.sprite) then return end
+    return originalDrawGhost(pose)
+  end
+
+  local function drawExternalShadow(sprite, px, py, facing, phase, flip, ground,
+                                     lift)
+    if kittVisible() and kittSpriteDef(sprite) then
+      local player = Game.overworld and Game.overworld.player
+      local context = externalContext("shadow", sprite, px, py, facing, phase,
+        flip, ground, nil, lift, player and player.moving)
+      if drawVoxelModel(context) then return end
+    end
+    return originalDrawShadow(sprite, px, py, facing, phase, flip, ground, lift)
+  end
+
+  local function drawExternalModelShadow(mesh, texture, model)
+    local overworld = Game.overworld
+    local player = overworld and overworld.player
+    local sprite = player and kittSprite(player)
+    if player and isOutdoorKittVisible(player) and sprite
+        and texture == sprite:resolveImage() then
+      local ground = VoxelScene.groundAt(overworld.map, player.cellX, player.cellY)
+      local context = externalContext("shadow", sprite, player.px, player.py,
+        player.facing, 0, false, ground, nil, 0, player.moving)
+      if drawVoxelModel(context) then return end
+    end
+    return rawShadowDraw(mesh, texture, model)
+  end
+
+  local function installExternalVoxel()
+    if externalVoxelInstalled then return true end
+    if not loadExternalVoxel() then return false end
+    local drawCast = findUpvalue(VoxelScene.render, "drawCast")
+    originalDrawEntity = drawCast and replaceUpvalue(drawCast, "drawEntity",
+      drawExternalEntity)
+    originalDrawGhost = replaceUpvalue(VoxelScene.render, "drawGhost",
+      drawExternalGhost)
+    originalDrawShadow = replaceUpvalue(VoxelScene.render, "drawShadow",
+      drawExternalShadow)
+    if not (originalDrawEntity and originalDrawGhost and originalDrawShadow) then
+      mod.log:warn("Dramatic Shape render hooks are unavailable")
+      return false
+    end
+    rawShadowDraw = ShadowMap.draw
+    ShadowMap.draw = drawExternalModelShadow
+    externalVoxelInstalled = true
+    return true
+  end
+
+  mod.events:on("mods.loaded", installExternalVoxel)
+  installExternalVoxel()
+
   Player.pose = function(self)
     local sprite, px, py, facing, phase, flip, hopping = vanillaPose(self)
-    if isOutdoorPlayer(self) then
+    if isOutdoorKittVisible(self) then
       if turbo.player == self then
         py = py - 6
         hopping = true
@@ -599,6 +951,10 @@ return function(mod)
       self.moving = false
       self.stepFlip = not self.stepFlip
       self.stepLanded = true
+      local landedMap = turbo.map
+      self.__gen1KrTerrainRecovery = landedMap
+          and not landedMap:isWaterCell(self.cellX, self.cellY)
+          and not landedMap:isWalkableCell(self.cellX, self.cellY) or nil
       clearTurbo()
       return true
     end
@@ -610,8 +966,14 @@ return function(mod)
   local engineSource
   local scannerSource
   local wilhelmSource
-  local impactSource
+  local crashSource
+  local crashTarget
+  local crashDirection
+  local crashCollided
   local turboSource
+  local skiSource
+  local powerUpSource
+  local powerDownSource
   local wilhelmDelay
   local flyingNpcs = setmetatable({}, { __mode = "k" })
   local collisionCooldown = setmetatable({}, { __mode = "k" })
@@ -824,7 +1186,7 @@ return function(mod)
 
   local function updateEngine()
     local overworld = mapOverworld()
-    if not (overworld and overworld.player.moving) then
+    if not (kittEnabled() and overworld and overworld.player.moving) then
       stopEngine()
       return
     end
@@ -842,7 +1204,7 @@ return function(mod)
   end
 
   local function playScanner()
-    if not liveOverworld() then return end
+    if not (kittEnabled() and liveOverworld()) then return end
     scannerSource = scannerSource or source(SCANNER_FILE, "static")
     if scannerSource then
       pcall(scannerSource.stop, scannerSource)
@@ -851,7 +1213,7 @@ return function(mod)
   end
 
   local function playWilhelm()
-    if not liveOverworld() then return end
+    if not (kittEnabled() and liveOverworld()) then return end
     wilhelmSource = wilhelmSource or source(WILHELM_FILE, "static")
     if wilhelmSource then
       pcall(wilhelmSource.stop, wilhelmSource)
@@ -859,23 +1221,110 @@ return function(mod)
     end
   end
 
-  local function playImpact()
-    if not liveOverworld() then return end
-    impactSource = impactSource or source(IMPACT_FILE, "static")
-    if impactSource then
-      pcall(impactSource.stop, impactSource)
-      pcall(impactSource.setVolume, impactSource, 1)
-      pcall(impactSource.play, impactSource)
+  local function crashPlaying()
+    if not crashSource then return false end
+    local ok, playing = pcall(crashSource.isPlaying, crashSource)
+    return ok and playing
+  end
+
+  local function stopCrash()
+    if crashSource then pcall(crashSource.stop, crashSource) end
+    crashTarget = nil
+    crashDirection = nil
+    crashCollided = nil
+  end
+
+  local function playCrash(npc, direction, timeToImpact)
+    if not (kittEnabled() and liveOverworld())
+        or not optionValue("impactCollision", true) then
+      return false
+    end
+    crashSource = crashSource or source(CRASH_FILE, "static")
+    if not crashSource then return false end
+    pcall(crashSource.stop, crashSource)
+    local offset = CRASH_IMPACT_OFFSET
+    if timeToImpact and timeToImpact > 0 then
+      offset = math.max(0, CRASH_IMPACT_OFFSET - timeToImpact)
+    end
+    pcall(crashSource.seek, crashSource, offset)
+    pcall(crashSource.setVolume, crashSource, 1)
+    pcall(crashSource.play, crashSource)
+    crashTarget = npc
+    crashDirection = direction
+    crashCollided = false
+    return true
+  end
+
+  local function markCrashCollision(npc, direction)
+    if crashTarget ~= npc or crashDirection ~= direction or not crashPlaying() then
+      playCrash(npc, direction, 0)
+    end
+    if crashTarget == npc and crashDirection == direction then
+      crashCollided = true
     end
   end
 
   local function playTurbo()
-    if not liveOverworld() then return end
+    if not (kittEnabled() and liveOverworld()) then return end
     turboSource = turboSource or source(TURBO_FILE, "static")
     if turboSource then
       pcall(turboSource.stop, turboSource)
       pcall(turboSource.play, turboSource)
     end
+  end
+
+  local function playSki()
+    if not (kittEnabled() and liveOverworld()) then return end
+    skiSource = skiSource or source(SKI_FILE, "static")
+    if skiSource then
+      pcall(skiSource.stop, skiSource)
+      pcall(skiSource.play, skiSource)
+    end
+  end
+
+  local function playPowerUp()
+    if optionValue("audio", "Original") ~= "Original" then return end
+    powerUpSource = powerUpSource or source(POWER_UP_FILE, "static")
+    if powerUpSource then
+      pcall(powerUpSource.stop, powerUpSource)
+      pcall(powerUpSource.play, powerUpSource)
+    end
+  end
+
+  local function playPowerDown()
+    if optionValue("audio", "Original") ~= "Original" then
+      powerDownVisible = false
+      return false
+    end
+    powerDownSource = powerDownSource or source(POWER_DOWN_FILE, "static")
+    if not powerDownSource then
+      powerDownVisible = false
+      return false
+    end
+    powerDownVisible = true
+    pcall(powerDownSource.stop, powerDownSource)
+    pcall(powerDownSource.play, powerDownSource)
+    return true
+  end
+
+  local function updatePowerDown()
+    if not powerDownVisible then return end
+    local ok, playing = powerDownSource and pcall(powerDownSource.isPlaying,
+                                                    powerDownSource)
+    if ok and playing then return end
+    powerDownVisible = false
+    local overworld = mapOverworld()
+    if overworld then
+      Music.playMap(Game.data, overworld.map.id, Game.save.onBike,
+                    overworld.player.surfing)
+    end
+  end
+
+  local function toggleSkiMode(game)
+    if not kittEnabled() then return false end
+    setOption(game, "skiMode", not optionValue("skiMode", false))
+    playSki()
+    return true
   end
 
   clearTurbo = function()
@@ -897,6 +1346,7 @@ return function(mod)
   end
 
   local function requestTurbo(input)
+    if not kittEnabled() then return end
     local overworld = liveOverworld()
     local player = overworld and overworld.player
     if not player or turbo.player then return end
@@ -908,6 +1358,10 @@ return function(mod)
   end
 
   local function startTurbo()
+    if not kittEnabled() then
+      clearTurbo()
+      return false
+    end
     local request = turbo.request
     if not request then return false end
     local overworld = liveOverworld()
@@ -957,14 +1411,61 @@ return function(mod)
     return px + dx * 16, py + dy * 16
   end
 
-  local function collisionHit(player, npc, direction)
+  local function collisionOffset(player, npc, direction)
     local dx = direction == "right" and 1 or direction == "left" and -1 or 0
     local dy = direction == "down" and 1 or direction == "up" and -1 or 0
     local offsetX = npc.px - player.px
     local offsetY = npc.py - player.py
     local forward = offsetX * dx + offsetY * dy
     local lateral = math.abs(offsetX * dy - offsetY * dx)
-    return forward >= -10 and forward <= COLLISION_RADIUS and lateral <= 20
+    return forward, lateral
+  end
+
+  local function collisionHit(player, npc, direction)
+    local forward, lateral = collisionOffset(player, npc, direction)
+    return forward >= -8 and forward <= COLLISION_RADIUS
+       and lateral <= COLLISION_HALF_WIDTH
+  end
+
+  local function playerSpeed(player)
+    local frames = math.max(1, player.stepFramesCur or 16)
+    local distance = turbo.player == player and turbo.distance or 16
+    return distance * 60 / frames
+  end
+
+  local function updateCrashPreRoll(overworld, player, directions)
+    if crashCollided then
+      if not crashPlaying() then stopCrash() end
+      return
+    end
+    if not player.moving then
+      stopCrash()
+      return
+    end
+    local speed = playerSpeed(player)
+    local lead = COLLISION_RADIUS + speed * CRASH_PRE_ROLL
+    local target, direction, timeToImpact
+    for facing in pairs(directions) do
+      for _, npc in ipairs(overworld.npcs or {}) do
+        if not flyingNpcs[npc] then
+          local forward, lateral = collisionOffset(player, npc, facing)
+          if lateral <= COLLISION_HALF_WIDTH and forward > COLLISION_RADIUS
+              and forward <= lead then
+            local candidate = (forward - COLLISION_RADIUS) / speed
+            if not timeToImpact or candidate < timeToImpact then
+              target, direction, timeToImpact = npc, facing, candidate
+            end
+          end
+        end
+      end
+    end
+    if not target then
+      stopCrash()
+      return
+    end
+    if crashTarget ~= target or crashDirection ~= direction or not crashPlaying() then
+      playCrash(target, direction, timeToImpact)
+    end
   end
 
   local function launchNpc(npc, direction)
@@ -998,7 +1499,7 @@ return function(mod)
     removeNpc(overworld, npc)
     spawnExplosion(overworld, npc)
     pcall(require("src.core.Sound").play, Game.data, "Collision")
-    playImpact()
+    markCrashCollision(npc, direction)
     wilhelmDelay = 0.42
   end
 
@@ -1026,8 +1527,17 @@ return function(mod)
       end
     end
     updateExplosions(step)
-    if not overworld or not optionValue("impactCollision", true)
-        or not overworld.player then
+    if not kittEnabled() then
+      stopCrash()
+      wilhelmDelay = nil
+      return
+    end
+    if not overworld or not overworld.player then
+      stopCrash()
+      return
+    end
+    if not optionValue("impactCollision", true) then
+      stopCrash()
       return
     end
     local input = Game.input
@@ -1041,6 +1551,7 @@ return function(mod)
     if turbo.player == overworld.player and turbo.direction then
       directions[turbo.direction] = true
     end
+    updateCrashPreRoll(overworld, overworld.player, directions)
     for direction in pairs(directions) do
         for _, npc in ipairs(overworld.npcs or {}) do
           if collisionHit(overworld.player, npc, direction) then
@@ -1055,9 +1566,179 @@ return function(mod)
     return tracks[value or "Original"]
   end
 
+  local carToggleRect
+  local carIcons = {}
+  local skiToggleRect
+  local skiIcon
+
+  local function carButtonGeometry(width, height)
+    local buttonW = math.min(72, math.max(56, math.floor(height * 0.1)))
+    local buttonH = math.min(52, math.max(40, math.floor(height * 0.072)))
+    local margin = math.max(12, math.floor(width * 0.018))
+    local x = width - margin - buttonW
+    local y = margin
+    return {
+      drawX = x,
+      drawY = y,
+      x = x - 18,
+      y = y - 18,
+      w = buttonW + 36,
+      h = buttonH + 36,
+      width = buttonW,
+      height = buttonH,
+    }
+  end
+
+  local function skiButtonGeometry(width, height)
+    local controls = Game.touchControls
+    local layout = controls and controls.layout and controls:layout()
+    local a = layout and layout.a
+    local b = layout and layout.b
+    if a and b then
+      local size = math.max(24, math.min(36, math.floor(math.min(a.w, b.w) * 0.42)))
+      local centerX = b.cx - b.w * 0.66
+      local centerY = b.cy - b.w * 0.62
+      return {
+        drawX = centerX - size / 2,
+        drawY = centerY - size / 2,
+        x = centerX - size / 2 - 10,
+        y = centerY - size / 2 - 10,
+        w = size + 20,
+        h = size + 20,
+        size = size,
+      }
+    end
+    local size = math.max(24, math.min(36, math.floor(math.min(width, height) * 0.07)))
+    return {
+      drawX = width - size * 3,
+      drawY = height - size * 2.2,
+      x = width - size * 3 - 10,
+      y = height - size * 2.2 - 10,
+      w = size + 20,
+      h = size + 20,
+      size = size,
+    }
+  end
+
+  local function mobilePlatform()
+    local osName = love.system and love.system.getOS and love.system.getOS()
+    return osName == "iOS" or osName == "Android"
+  end
+
+  local function loadCarIcon(mode)
+    local cached = carIcons[mode]
+    if cached ~= nil then return cached or nil end
+    local path = CAR_ICON_FILES[mode] or CAR_ICON_FILES.Original
+    local ok, image = pcall(love.graphics.newImage, mod.assets:path(path))
+    if ok and image then
+      pcall(image.setFilter, image, "linear", "linear")
+      carIcons[mode] = image
+      return image
+    end
+    carIcons[mode] = false
+    return nil
+  end
+
+  local function loadSkiIcon()
+    if skiIcon ~= nil then return skiIcon or nil end
+    local ok, image = pcall(love.graphics.newImage,
+                            mod.assets:path(SKI_ICON_FILE))
+    if ok and image then
+      pcall(image.setFilter, image, "linear", "linear")
+      skiIcon = image
+      return image
+    end
+    skiIcon = false
+    return nil
+  end
+
+  local function toggleCarMode(game)
+    local current = optionValue("audio", "Original")
+    setOption(game, "audio", current == "Original" and "KR2008" or "Original")
+  end
+
+  mod.hooks:wrap("render.hud", function(next, game, viewport)
+    next(game, viewport)
+    if not (mobilePlatform() and kittEnabled() and liveOverworld()) then
+      carToggleRect = nil
+      skiToggleRect = nil
+      return
+    end
+    local width = (viewport and viewport.width) or love.graphics.getWidth()
+    local height = (viewport and viewport.height) or love.graphics.getHeight()
+    local geometry = carButtonGeometry(width, height)
+    local skiGeometry = skiButtonGeometry(width, height)
+    local x, y = geometry.drawX, geometry.drawY
+    carToggleRect = geometry
+    local mode = optionValue("audio", "Original")
+    local image = loadCarIcon(mode)
+    love.graphics.push("all")
+    love.graphics.origin()
+    love.graphics.setColor(0.04, 0.05, 0.07, 0.62)
+    love.graphics.rectangle("fill", x, y, geometry.width, geometry.height, 10, 10)
+    if image then
+      local scale = math.min((geometry.width - 8) / image:getWidth(),
+                             (geometry.height - 8) / image:getHeight())
+      local drawW = image:getWidth() * scale
+      local drawH = image:getHeight() * scale
+      love.graphics.setColor(1, 1, 1, 1)
+      love.graphics.draw(image, x + (geometry.width - drawW) / 2,
+                         y + (geometry.height - drawH) / 2,
+                         0, scale, scale)
+    end
+    skiToggleRect = skiGeometry
+    love.graphics.setColor(0.04, 0.05, 0.07, 0.7)
+    love.graphics.circle("fill", skiGeometry.drawX + skiGeometry.size / 2,
+                         skiGeometry.drawY + skiGeometry.size / 2,
+                         skiGeometry.size / 2)
+    if skiEnabled() then
+      love.graphics.setColor(0.72, 0.92, 1, 0.9)
+      love.graphics.setLineWidth(2)
+      love.graphics.circle("line", skiGeometry.drawX + skiGeometry.size / 2,
+                           skiGeometry.drawY + skiGeometry.size / 2,
+                           skiGeometry.size / 2 - 1)
+    end
+    local icon = loadSkiIcon()
+    if icon then
+      local scale = (skiGeometry.size * 0.62) / math.max(icon:getWidth(), icon:getHeight())
+      love.graphics.setColor(1, 1, 1, 0.95)
+      love.graphics.draw(icon,
+        skiGeometry.drawX + (skiGeometry.size - icon:getWidth() * scale) / 2,
+        skiGeometry.drawY + (skiGeometry.size - icon:getHeight() * scale) / 2,
+        0, scale, scale)
+    end
+    love.graphics.pop()
+  end, 1000)
+
+  local baseTouchpressed = Game.__gen1KrBaseTouchpressed or Game.touchpressed
+  Game.__gen1KrBaseTouchpressed = baseTouchpressed
+  function Game:touchpressed(id, x, y)
+    if mobilePlatform() and kittEnabled() and liveOverworld() then
+      if not carToggleRect then
+        carToggleRect = carButtonGeometry(love.graphics.getWidth(),
+                                          love.graphics.getHeight())
+      end
+      if not skiToggleRect then
+        skiToggleRect = skiButtonGeometry(love.graphics.getWidth(),
+                                           love.graphics.getHeight())
+      end
+      local ski = skiToggleRect
+      if x >= ski.x and x <= ski.x + ski.w and y >= ski.y and y <= ski.y + ski.h then
+        toggleSkiMode(self)
+        return
+      end
+      local r = carToggleRect
+      if x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h then
+        toggleCarMode(self)
+        return
+      end
+    end
+    return baseTouchpressed(self, id, x, y)
+  end
+
   mod.hooks:wrap("music.select", function(next, chosen, ctx)
     local result = next(chosen, ctx)
-    if ctx and ctx.reason == "map" and ctx.mapId then
+    if kittEnabled() and ctx and ctx.reason == "map" and ctx.mapId then
       local def = Game.data.maps and Game.data.maps[ctx.mapId]
       if def and Map.isOutdoor(def) then
         local replacement = selectedTrack()
@@ -1078,10 +1759,12 @@ return function(mod)
         turboPressed = true
       end
     end
-    if turboPressed then requestTurbo(input) end
+    if kittEnabled() and turboPressed then requestTurbo(input) end
     startTurbo()
     local result = next(game, dt)
-    if scannerPressed then playScanner() end
+    updateSkiState(dt)
+    updatePowerDown()
+    if kittEnabled() and scannerPressed then playScanner() end
     updateEngine()
     updateCollisions(dt)
     return result
@@ -1090,15 +1773,26 @@ return function(mod)
   local baseKeypressed = Game.__gen1KrBaseKeypressed or Game.keypressed
   Game.__gen1KrBaseKeypressed = baseKeypressed
   function Game:keypressed(key)
-    if liveOverworld() and key == "space" then
+    if kittEnabled() and liveOverworld() and key == "space" then
       requestTurbo(self.input)
       return
     end
-    if liveOverworld() and (key == "return" or key == "kpenter") then
+    if kittEnabled() and liveOverworld()
+        and (key == "return" or key == "kpenter") then
       playScanner()
       return
     end
-    return baseKeypressed(self, key)
+    if kittEnabled() and liveOverworld() and key == "c" then
+      local current = optionValue("audio", "Original")
+      setOption(self, "audio", current == "Original" and "KR2008" or "Original")
+      return
+    end
+    if kittEnabled() and liveOverworld() and key == "v" then
+      toggleSkiMode(self)
+      return
+    end
+    local result = baseKeypressed(self, key)
+    return result
   end
 
   mod.events:on("mod.options_changed", function(payload)
@@ -1107,6 +1801,31 @@ return function(mod)
     end
     if payload.key == "threeD" then
       setVoxelMode(Game, payload.value and true or false)
+    end
+    if payload.key == "kitt" then
+      stopEngine()
+      clearTurbo()
+      stopCrash()
+      if scannerSource then pcall(scannerSource.stop, scannerSource) end
+      if turboSource then pcall(turboSource.stop, turboSource) end
+      if skiSource then pcall(skiSource.stop, skiSource) end
+      if payload.value then
+        powerDownVisible = false
+        if powerDownSource then pcall(powerDownSource.stop, powerDownSource) end
+        playPowerUp()
+      elseif playPowerDown() then
+        return
+      end
+      local overworld = mapOverworld()
+      if overworld then
+        Music.playMap(Game.data, overworld.map.id, Game.save.onBike,
+                      overworld.player.surfing)
+      end
+      return
+    end
+    if payload.key == "impactCollision" then
+      if not payload.value then stopCrash() end
+      return
     end
     if payload.key ~= "audio" then return end
     stopEngine()
