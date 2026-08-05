@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mod_dir=$(cd "$(dirname "$0")/.." && pwd)
+engine_repo=${GEN1RECOMP_REPO:-"$mod_dir/../gen1recomp"}
+
+if [ ! -f "$engine_repo/tools/modkit.py" ]; then
+  printf '%s\n' "gen1-kr pre-commit: set GEN1RECOMP_REPO to the engine checkout" >&2
+  exit 1
+fi
+
+cd "$engine_repo"
+python3 tools/modkit.py validate "$mod_dir" --strict
+python3 tools/modkit.py lint "$mod_dir"

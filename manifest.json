@@ -1,7 +1,7 @@
 {
   "id": "gen1_kr",
   "name": "Gen1 KR",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
