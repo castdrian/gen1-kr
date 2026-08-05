@@ -1,0 +1,17 @@
+{
+  "id": "gen1_kr",
+  "name": "Gen1 KR",
+  "version": "0.1.0",
+  "api": 2,
+  "entry": "main.lua",
+  "profile": "content",
+  "category": "AUDIO",
+  "game_version": "0.0.0-dev || >=0.1.37 <2.0.0",
+  "priority": 100,
+  "permissions": ["engine_internals"],
+  "dependencies": [],
+  "optional_dependencies": [],
+  "conflicts": ["DRAMATIC_SHAPE"],
+  "description": "Drive KITT across Kanto.",
+  "github": "castdrian/gen1-kr"
+}
