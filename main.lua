@@ -17,6 +17,7 @@ local CRASH_IMPACT_OFFSET = 1.66
 local CRASH_PRE_ROLL = 0.75
 local TURBO_FILE = "audio/turbo.ogg"
 local LASER_FILE = "audio/laser.ogg"
+local LASER_TEXTURE_FILE = "assets/laser.png"
 local SKI_FILE = "audio/ski_mode.ogg"
 local POWER_UP_FILE = "audio/power_up.ogg"
 local POWER_DOWN_FILE = "audio/power_down.ogg"
@@ -476,7 +477,7 @@ return function(mod)
   end
 
   local function createLaserMesh(ctx)
-    local halfWidth, halfHeight, depth = 0.28, 0.16, 144
+    local halfWidth, halfHeight, depth = 0.52, 0.32, 144
     local vertices = {}
     local function vertex(x, y, z, u, v)
       return { x, y, z, u, v, 1 }
@@ -623,6 +624,12 @@ return function(mod)
       wheelClock = nil,
       wheelFrame = nil,
     }
+    local laserTextureOk, laserTexture = pcall(love.graphics.newImage,
+                                                mod.assets:path(LASER_TEXTURE_FILE))
+    if laserTextureOk and laserTexture then
+      pcall(laserTexture.setFilter, laserTexture, "nearest", "nearest")
+      model.laserTexture = laserTexture
+    end
     local skiTextureOk, skiTexture = pcall(love.graphics.newImage,
                                             mod.assets:path("assets/ski_palette.png"))
     if skiTextureOk and skiTexture then
@@ -781,20 +788,21 @@ return function(mod)
 
   local function drawLaserBeam(ctx, model, matrix)
     if ctx.pass ~= "scene" or not laserState.active or not model.laserMesh then return end
-    local textures = model.scannerLightTextures and model.scannerLightTextures.KITT
-    local texture = textures and textures[3]
+    local texture = model.laserTexture
     if not texture then return end
     local m = ctx.mat4
     local beamMatrix = m.mul(matrix,
-      m.translate(0, 5.45, 20.62))
+      m.translate(0, 4.1, 20.62))
     pcall(model.laserMesh.setTexture, model.laserMesh, texture)
     local flatten = ctx.voxel.flatten
-    local outerMatrix = m.mul(beamMatrix, m.scale(1.85, 1.85, 1))
+    ctx.voxel.depth("always")
+    local outerMatrix = m.mul(beamMatrix, m.scale(2.1, 2.1, 1))
     if flatten then flatten({ 0.95, 0.015, 0.005 }, 1) end
     ctx.draw(model.laserMesh, texture, outerMatrix, 0, outerMatrix)
     local coreMatrix = m.mul(beamMatrix, m.scale(0.6, 0.6, 1))
     if flatten then flatten({ 1, 0.72, 0.5 }, 1) end
     ctx.draw(model.laserMesh, texture, coreMatrix, 0, coreMatrix)
+    ctx.voxel.depth("test")
     if flatten then flatten() end
   end
 
