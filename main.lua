@@ -714,7 +714,7 @@ return function(mod)
   end
 
   local function drawScannerSweep(ctx, model, matrix)
-    if model.mode == "OriginalKarr" then return end
+    if model.mode == "Original" or model.mode == "OriginalKarr" then return end
     local scannerName = karrEnabled()
         and (optionValue("audio", "Original") == "Original" and "KARR2000" or "KARR3000")
         or "KITT"
@@ -789,14 +789,12 @@ return function(mod)
       m.translate(0, 4.95, 18.64))
     pcall(model.laserMesh.setTexture, model.laserMesh, texture)
     local flatten = ctx.voxel.flatten
-    ctx.voxel.depth("always")
     local outerMatrix = m.mul(beamMatrix, m.scale(1.85, 1.85, 1))
     if flatten then flatten({ 0.95, 0.015, 0.005 }, 1) end
     ctx.draw(model.laserMesh, texture, outerMatrix, 0, outerMatrix)
     local coreMatrix = m.mul(beamMatrix, m.scale(0.6, 0.6, 1))
     if flatten then flatten({ 1, 0.72, 0.5 }, 1) end
     ctx.draw(model.laserMesh, texture, coreMatrix, 0, coreMatrix)
-    ctx.voxel.depth("test")
     if flatten then flatten() end
   end
 
