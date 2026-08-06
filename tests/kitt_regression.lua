@@ -172,13 +172,12 @@ local clearMap = {
   def = {},
   inBounds = function() return true end,
   isWaterCell = function() return false end,
-  isWalkableCell = function() return true end,
+  isWalkableCell = function(_, x, y) return not (x == 2 and y == 3) end,
 }
 local clearPlayer = { surfing = false, fishing = false }
 modules["src.core.Game"].overworld = { player = clearPlayer, map = clearMap }
 assert(hooks["movement.collision"](function() return true end, true,
-  { mover = clearPlayer, map = clearMap, toX = 2, toY = 2, dir = "down" }) == true)
-clearMap.isWalkableCell = function() return false end
+  { mover = clearPlayer, map = clearMap, toX = 2, toY = 2, dir = "right" }) == true)
 assert(hooks["movement.collision"](function() return true end, true,
   { mover = clearPlayer, map = clearMap, toX = 2, toY = 2, dir = "down" }) == false)
 
@@ -189,12 +188,17 @@ assert(source:find("SKI_FILE", 1, true))
 assert(source:find("vehicleHitbox", 1, true))
 assert(source:find("VEHICLE_BUMPER_REACH", 1, true))
 assert(not source:find("VEHICLE_HALF_WIDTH", 1, true))
+assert(not source:find("wheel.inset", 1, true))
 assert(source:find("installExternalVoxel", 1, true))
 assert(source:find("skiTransform", 1, true))
 assert(source:find("rotateZ", 1, true))
 assert(not source:find("m.rotateX(skiState.amount", 1, true))
 assert(source:find("POWER_UP_FILE", 1, true))
 assert(source:find("POWER_DOWN_FILE", 1, true))
+assert(source:find("POWER_DOWN_DURATION", 1, true))
+assert(source:find("math.cos(math.pi * progress) * 0.32", 1, true))
+assert(not source:find('key = "threeD"', 1, true))
+assert(not source:find("assets/kitt.png", 1, true))
 assert(source:find('ctx.facing ~= "down"', 1, true))
 assert(source:find('ctx.voxel.depth("always")', 1, true))
 

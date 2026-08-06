@@ -1,9 +1,5 @@
 # Credits
 
-KITT sprite reference: [The Spriters Resource](https://www.spriters-resource.com/turbografx_16/knightriderspecial/asset/103663/)
-
-The sprite sheet is from Knight Rider Special for TurboGrafx-16 and is used here as the source for the reduced KITT overworld sheet.
-
 Voxel model: low-poly conversion of the user-provided Blender KITT source.
 
 Voxel rendering: [Dramatic Shape Voxel Mod](https://github.com/DramaticShape/DramaticShapeVoxelMod).

@@ -1,5 +1,4 @@
 local MOD_ID = "gen1_kr"
-local SPRITE_ID = "GEN1_KR_KITT"
 
 local MUSIC = {
   Original = { id = "Music_Gen1KR_Original", file = "audio/original.ogg" },
@@ -19,9 +18,10 @@ local TURBO_FILE = "audio/turbo.ogg"
 local SKI_FILE = "audio/ski_mode.ogg"
 local POWER_UP_FILE = "audio/power_up.ogg"
 local POWER_DOWN_FILE = "audio/power_down.ogg"
+local POWER_DOWN_DURATION = 8.05
 local COLLISION_RADIUS = 22
 local COLLISION_HALF_WIDTH = 7
-local VEHICLE_BUMPER_REACH = 7
+local VEHICLE_BUMPER_REACH = 1
 local VOXEL_LEVEL = 4
 local MODEL_FILES = {
   Original = "assets/kitt_model.lua",
@@ -67,13 +67,7 @@ return function(mod)
   local VoxelState
   local Mat4
   local ShadowMap
-
-  mod.content.sprites:register(SPRITE_ID, {
-    image = mod.assets:path("assets/kitt.png"),
-    frames = 6,
-    walker = true,
-    trueColor = true,
-  })
+  local turbo
 
   local tracks = {}
   local function hasFile(relative)
@@ -94,12 +88,6 @@ return function(mod)
   end
 
   local ownOptions = {
-    {
-      key = "threeD",
-      label = "3D MODE",
-      type = "toggle",
-      default = true,
-    },
     {
       key = "kitt",
       label = "K.I.T.T.",
@@ -236,9 +224,8 @@ return function(mod)
     if game and game.writeOptions then game:writeOptions() end
   end
 
-  local function setVoxelMode(game, enabled)
-    local level = enabled and math.min(VOXEL_LEVEL, Pipelines.maxLevel("voxel")) or 0
-    Pipelines.setLevel("voxel", level)
+  local function setVoxelMode(game)
+    Pipelines.setLevel("voxel", math.min(VOXEL_LEVEL, Pipelines.maxLevel("voxel")))
     local opts = game and game.save and game.save.options
     if opts then
       Pipelines.syncOptions(opts)
@@ -261,7 +248,6 @@ return function(mod)
     local function cycleBoolean(game_, key, default)
       local enabled = optionValue(key, default)
       setOption(game_, key, not enabled)
-      if key == "threeD" then setVoxelMode(game_, not enabled) end
       return true
     end
     local function cycleChoice(game_, key, choices, default)
@@ -273,12 +259,6 @@ return function(mod)
       setOption(game_, key, choices[index % #choices + 1])
       return true
     end
-    filtered[#filtered + 1] = {
-      id = MOD_ID .. ":threeD",
-      label = "3D MODE",
-      value = function() return optionValue("threeD", true) and "ON" or "OFF" end,
-      step = function(game_) return cycleBoolean(game_, "threeD", true) end,
-    }
     filtered[#filtered + 1] = {
       id = MOD_ID .. ":kitt",
       label = "K.I.T.T.",
@@ -503,7 +483,6 @@ return function(mod)
           center = wheel.center,
           mesh = wheelMesh,
           heightScale = mode == "KR2008" and 1.3767 or 1,
-          inset = mode == "KR2008" and 0.88 or 1,
         }
       end
     end
@@ -597,16 +576,20 @@ return function(mod)
       left = -math.pi / 2,
     })[facing] or 0
     local m = ctx.mat4
+    local player = Game.overworld and Game.overworld.player
+    local progress = player == turbo.player and player.progress
+      and math.max(0, math.min(1, player.progress / math.max(1, player.stepFramesCur or 1))) or 0
+    local pitch = player == turbo.player and math.cos(math.pi * progress) * 0.32 or 0
     return m.mul(
       m.translate(ctx.px + 8, ctx.ground + ctx.lift, ctx.py + 8),
-      m.mul(m.rotateY(yaw), skiTransform(m)))
+      m.mul(m.rotateY(yaw), m.mul(m.rotateX(pitch), skiTransform(m))))
   end
 
   local function voxelWheelMatrix(ctx, wheel)
     local m = ctx.mat4
     return m.mul(
       voxelModelMatrix(ctx),
-      m.mul(m.translate(wheel.center[1] * (wheel.inset or 1), wheel.center[2], wheel.center[3]),
+      m.mul(m.translate(wheel.center[1], wheel.center[2], wheel.center[3]),
             m.mul(m.rotateX(wheel.angle or 0),
                   m.scale(1, wheel.heightScale or 1, 1))))
   end
@@ -675,8 +658,7 @@ return function(mod)
   local drawExplosions
 
   local function drawVoxelModel(ctx)
-    if not optionValue("threeD", true) then return false end
-    if not ctx.def or ctx.def.image ~= mod.path .. "/assets/kitt.png" then
+    if not (ctx.sprite and ctx.sprite.__gen1KrKitt) then
       return false
     end
     local model = loadVoxelModel(ctx)
@@ -716,7 +698,7 @@ return function(mod)
   local vanillaUpdate = Player.__gen1KrVanillaUpdate or Player.update
   Player.__gen1KrVanillaUpdate = vanillaUpdate
   local kittSprites = setmetatable({}, { __mode = "k" })
-  local turbo = {
+  turbo = {
     player = nil,
     overworld = nil,
     map = nil,
@@ -728,17 +710,10 @@ return function(mod)
   local function vehicleHitbox(map, cellX, cellY, direction)
     local delta = Collision.DELTA[direction]
     if not delta then return false end
-    local centerX, centerY = cellX * 16 + 8, cellY * 16 + 8
-    for _, distance in ipairs({ -VEHICLE_BUMPER_REACH, VEHICLE_BUMPER_REACH }) do
-      local px = centerX + delta[1] * distance
-      local py = centerY + delta[2] * distance
-      local x, y = math.floor(px / 16), math.floor(py / 16)
-      if not map:inBounds(x, y) or map:isWaterCell(x, y)
-          or not map:isWalkableCell(x, y) then
-        return false
-      end
-    end
-    return true
+    local x = cellX + delta[1] * VEHICLE_BUMPER_REACH
+    local y = cellY + delta[2] * VEHICLE_BUMPER_REACH
+    return map:inBounds(x, y) and not map:isWaterCell(x, y)
+      and map:isWalkableCell(x, y)
   end
 
   local function isOutdoorKittVisible(player)
@@ -781,12 +756,13 @@ return function(mod)
     return true
   end, 1000)
 
-  local function kittSprite(player)
+  local function kittSprite(player, baseSprite)
     local sprite = kittSprites[player]
     if sprite then return sprite end
-    local def = Game.data and Game.data.sprites and Game.data.sprites[SPRITE_ID]
+    local def = baseSprite and baseSprite.def
     if not def then return nil end
     sprite = SpriteRenderer.new(def, MOD_ID)
+    sprite.__gen1KrKitt = true
     kittSprites[player] = sprite
     return sprite
   end
@@ -795,7 +771,7 @@ return function(mod)
   local rawShadowDraw
 
   local function kittSpriteDef(sprite)
-    return sprite and sprite.def and sprite.def.image == mod.path .. "/assets/kitt.png"
+    return sprite and sprite.__gen1KrKitt
   end
 
   local function externalContext(pass, sprite, px, py, facing, phase, flip,
@@ -882,7 +858,7 @@ return function(mod)
   local function drawExternalModelShadow(mesh, texture, model)
     local overworld = Game.overworld
     local player = overworld and overworld.player
-    local sprite = player and kittSprite(player)
+    local sprite = player and kittSprites[player]
     if player and isOutdoorKittVisible(player) and sprite
         and texture == sprite:resolveImage() then
       local ground = VoxelScene.groundAt(overworld.map, player.cellX, player.cellY)
@@ -920,10 +896,12 @@ return function(mod)
     local sprite, px, py, facing, phase, flip, hopping = vanillaPose(self)
     if isOutdoorKittVisible(self) then
       if turbo.player == self then
-        py = py - 6
+        local progress = math.max(0, math.min(1,
+          (self.progress or 0) / math.max(1, self.stepFramesCur or 1)))
+        py = py - math.floor(math.sin(math.pi * progress) * 12)
         hopping = true
       end
-      local replacement = kittSprite(self)
+      local replacement = kittSprite(self, sprite)
       if replacement then
         return replacement, px, py, facing, phase, flip, hopping
       end
@@ -974,6 +952,7 @@ return function(mod)
   local skiSource
   local powerUpSource
   local powerDownSource
+  local powerDownDeadline
   local wilhelmDelay
   local flyingNpcs = setmetatable({}, { __mode = "k" })
   local collisionCooldown = setmetatable({}, { __mode = "k" })
@@ -1278,6 +1257,7 @@ return function(mod)
     skiSource = skiSource or source(SKI_FILE, "static")
     if skiSource then
       pcall(skiSource.stop, skiSource)
+      pcall(skiSource.setVolume, skiSource, 1)
       pcall(skiSource.play, skiSource)
     end
   end
@@ -1302,6 +1282,8 @@ return function(mod)
       return false
     end
     powerDownVisible = true
+    local now = love.timer and love.timer.getTime and love.timer.getTime() or 0
+    powerDownDeadline = now + POWER_DOWN_DURATION
     pcall(powerDownSource.stop, powerDownSource)
     pcall(powerDownSource.play, powerDownSource)
     return true
@@ -1309,10 +1291,13 @@ return function(mod)
 
   local function updatePowerDown()
     if not powerDownVisible then return end
+    local now = love.timer and love.timer.getTime and love.timer.getTime()
+    if now and powerDownDeadline and now < powerDownDeadline then return end
     local ok, playing = powerDownSource and pcall(powerDownSource.isPlaying,
                                                     powerDownSource)
     if ok and playing then return end
     powerDownVisible = false
+    powerDownDeadline = nil
     local overworld = mapOverworld()
     if overworld then
       Music.playMap(Game.data, overworld.map.id, Game.save.onBike,
@@ -1799,9 +1784,6 @@ return function(mod)
     if not (payload and payload.mod == mod.id) then
       return
     end
-    if payload.key == "threeD" then
-      setVoxelMode(Game, payload.value and true or false)
-    end
     if payload.key == "kitt" then
       stopEngine()
       clearTurbo()
@@ -1811,6 +1793,7 @@ return function(mod)
       if skiSource then pcall(skiSource.stop, skiSource) end
       if payload.value then
         powerDownVisible = false
+        powerDownDeadline = nil
         if powerDownSource then pcall(powerDownSource.stop, powerDownSource) end
         playPowerUp()
       elseif playPowerDown() then
@@ -1837,7 +1820,6 @@ return function(mod)
   end)
 
   mod.events:on("game.ready", function(payload)
-    setVoxelMode(payload and payload.game or Game,
-                 optionValue("threeD", true))
+    setVoxelMode(payload and payload.game or Game)
   end)
 end
