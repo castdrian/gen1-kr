@@ -18,10 +18,9 @@ local TURBO_FILE = "audio/turbo.ogg"
 local SKI_FILE = "audio/ski_mode.ogg"
 local POWER_UP_FILE = "audio/power_up.ogg"
 local POWER_DOWN_FILE = "audio/power_down.ogg"
-local POWER_DOWN_DURATION = 8.05
+local POWER_DOWN_DURATION = 3.35
 local COLLISION_RADIUS = 22
 local COLLISION_HALF_WIDTH = 7
-local VEHICLE_BUMPER_REACH = 1
 local VOXEL_LEVEL = 4
 local MODEL_FILES = {
   Original = "assets/kitt_model.lua",
@@ -579,7 +578,7 @@ return function(mod)
     local player = Game.overworld and Game.overworld.player
     local progress = player == turbo.player and player.progress
       and math.max(0, math.min(1, player.progress / math.max(1, player.stepFramesCur or 1))) or 0
-    local pitch = player == turbo.player and math.cos(math.pi * progress) * 0.32 or 0
+    local pitch = player == turbo.player and -math.cos(math.pi * progress) * 0.32 or 0
     return m.mul(
       m.translate(ctx.px + 8, ctx.ground + ctx.lift, ctx.py + 8),
       m.mul(m.rotateY(yaw), m.mul(m.rotateX(pitch), skiTransform(m))))
@@ -707,15 +706,6 @@ return function(mod)
     request = nil,
   }
   local clearTurbo
-  local function vehicleHitbox(map, cellX, cellY, direction)
-    local delta = Collision.DELTA[direction]
-    if not delta then return false end
-    local x = cellX + delta[1] * VEHICLE_BUMPER_REACH
-    local y = cellY + delta[2] * VEHICLE_BUMPER_REACH
-    return map:inBounds(x, y) and not map:isWaterCell(x, y)
-      and map:isWalkableCell(x, y)
-  end
-
   local function isOutdoorKittVisible(player)
     local overworld = Game.overworld
     return kittVisible() and overworld and overworld.player == player and overworld.map
@@ -749,10 +739,6 @@ return function(mod)
       return result
     end
     if not result then return false end
-    if not vehicleHitbox(map, ctx.toX, ctx.toY, ctx.dir) then
-      ctx.reason = "vehicle"
-      return false
-    end
     return true
   end, 1000)
 
@@ -953,6 +939,7 @@ return function(mod)
   local powerUpSource
   local powerDownSource
   local powerDownDeadline
+  local skiRequest
   local wilhelmDelay
   local flyingNpcs = setmetatable({}, { __mode = "k" })
   local collisionCooldown = setmetatable({}, { __mode = "k" })
@@ -1305,11 +1292,21 @@ return function(mod)
     end
   end
 
-  local function toggleSkiMode(game)
+  local function requestSkiMode(game)
     if not kittEnabled() then return false end
-    setOption(game, "skiMode", not optionValue("skiMode", false))
+    if skiRequest then return false end
     playSki()
+    skiRequest = { game = game, remaining = 0.18 }
     return true
+  end
+
+  local function updateSkiRequest(dt)
+    if not skiRequest then return end
+    skiRequest.remaining = skiRequest.remaining - (dt or 1 / 60)
+    if skiRequest.remaining > 0 then return end
+    local game = skiRequest.game
+    skiRequest = nil
+    setOption(game, "skiMode", not optionValue("skiMode", false))
   end
 
   clearTurbo = function()
@@ -1339,16 +1336,20 @@ return function(mod)
       overworld = overworld,
       map = overworld.map,
       direction = turboDirection(input, player),
+      remaining = 0.18,
     }
+    playTurbo()
   end
 
-  local function startTurbo()
+  local function startTurbo(dt)
     if not kittEnabled() then
       clearTurbo()
       return false
     end
     local request = turbo.request
     if not request then return false end
+    request.remaining = (request.remaining or 0) - (dt or 1 / 60)
+    if request.remaining > 0 then return false end
     local overworld = liveOverworld()
     local player = overworld and overworld.player
     if not player or turbo.player then
@@ -1386,7 +1387,6 @@ return function(mod)
     player.progress = 0
     player.stepFramesCur = 24
     player.hopFrames, player.hopTotal = 24, 24
-    playTurbo()
     return true
   end
 
@@ -1709,7 +1709,7 @@ return function(mod)
       end
       local ski = skiToggleRect
       if x >= ski.x and x <= ski.x + ski.w and y >= ski.y and y <= ski.y + ski.h then
-        toggleSkiMode(self)
+        requestSkiMode(self)
         return
       end
       local r = carToggleRect
@@ -1745,8 +1745,9 @@ return function(mod)
       end
     end
     if kittEnabled() and turboPressed then requestTurbo(input) end
-    startTurbo()
+    startTurbo(dt)
     local result = next(game, dt)
+    updateSkiRequest(dt)
     updateSkiState(dt)
     updatePowerDown()
     if kittEnabled() and scannerPressed then playScanner() end
@@ -1772,8 +1773,8 @@ return function(mod)
       setOption(self, "audio", current == "Original" and "KR2008" or "Original")
       return
     end
-    if kittEnabled() and liveOverworld() and key == "v" then
-      toggleSkiMode(self)
+    if kittEnabled() and liveOverworld() and key == "s" then
+      requestSkiMode(self)
       return
     end
     local result = baseKeypressed(self, key)
@@ -1787,6 +1788,7 @@ return function(mod)
     if payload.key == "kitt" then
       stopEngine()
       clearTurbo()
+      skiRequest = nil
       stopCrash()
       if scannerSource then pcall(scannerSource.stop, scannerSource) end
       if turboSource then pcall(turboSource.stop, turboSource) end
