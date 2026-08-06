@@ -786,7 +786,7 @@ return function(mod)
     if not texture then return end
     local m = ctx.mat4
     local beamMatrix = m.mul(matrix,
-      m.translate(0, 4.95, 18.64))
+      m.translate(0, 5.45, 20.62))
     pcall(model.laserMesh.setTexture, model.laserMesh, texture)
     local flatten = ctx.voxel.flatten
     local outerMatrix = m.mul(beamMatrix, m.scale(1.85, 1.85, 1))
