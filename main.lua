@@ -1033,6 +1033,7 @@ return function(mod)
   local crashDirection
   local crashCollided
   local turboSource
+  local activeTurboSources = {}
   local skiSource
   local attackTransformSource
   local powerUpSource
@@ -1424,9 +1425,19 @@ return function(mod)
   local function playTurbo()
     if not (kittEnabled() and liveOverworld()) then return end
     turboSource = turboSource or source(TURBO_FILE, "static")
-    if turboSource then
-      pcall(turboSource.stop, turboSource)
-      pcall(turboSource.play, turboSource)
+    if not turboSource then return end
+    local ok, effect = pcall(turboSource.clone, turboSource)
+    if not ok or not effect then return end
+    pcall(effect.setVolume, effect, 1)
+    pcall(effect.play, effect)
+    activeTurboSources[#activeTurboSources + 1] = effect
+  end
+
+  local function updateTurboAudio()
+    for index = #activeTurboSources, 1, -1 do
+      local effect = activeTurboSources[index]
+      local ok, playing = pcall(effect.isPlaying, effect)
+      if not ok or not playing then table.remove(activeTurboSources, index) end
     end
   end
 
@@ -2101,6 +2112,7 @@ return function(mod)
     end
     if kittEnabled() and turboPressed then requestTurbo(input) end
     startTurbo(dt)
+    updateTurboAudio()
     local result = next(game, dt)
     updateSkiRequest(dt)
     updateSkiState(dt)
@@ -2175,6 +2187,8 @@ return function(mod)
       stopCrash()
       if scannerSource then pcall(scannerSource.stop, scannerSource) end
       if turboSource then pcall(turboSource.stop, turboSource) end
+      for _, effect in ipairs(activeTurboSources) do pcall(effect.stop, effect) end
+      activeTurboSources = {}
       if skiSource then pcall(skiSource.stop, skiSource) end
       if attackTransformSource then pcall(attackTransformSource.stop, attackTransformSource) end
       stopVoice()
