@@ -1,4 +1,0 @@
-[submodule "third_party/DramaticShapeVoxelMod"]
-	path = third_party/DramaticShapeVoxelMod
-	url = https://github.com/DramaticShape/DramaticShapeVoxelMod.git
-	branch = dev

@@ -51,6 +51,24 @@ for _, path in ipairs({ "assets/scanner_dim.png", "assets/scanner_medium.png", "
   local handle = assert(io.open(path, "rb"))
   handle:close()
 end
+for _, path in ipairs({
+  "assets/karr2000_scanner_dim.png",
+  "assets/karr2000_scanner_medium.png",
+  "assets/karr2000_scanner_bright.png",
+  "assets/karr3000_scanner_dim.png",
+  "assets/karr3000_scanner_medium.png",
+  "assets/karr3000_scanner_bright.png",
+  "assets/karr-2000-icon.png",
+  "assets/karr-3000-icon.png",
+  "audio/karr-scanner.ogg",
+}) do
+  local handle = assert(io.open(path, "rb"))
+  handle:close()
+end
+for index = 0, 3 do
+  local handle = assert(io.open("assets/karr_palette_" .. index .. ".png", "rb"))
+  handle:close()
+end
 local impact = assert(io.open("audio/impact.ogg", "rb"))
 impact:close()
 local skiSound = assert(io.open("audio/ski_mode.ogg", "rb"))
@@ -63,12 +81,33 @@ for _, path in ipairs({ "assets/ski-mode-icon.svg", "assets/ski-mode-icon.png", 
   local handle = assert(io.open(path, "rb"))
   handle:close()
 end
+for _, path in ipairs({
+  "assets/kitt-3000-attack-model.lua",
+  "assets/kitt-3000-attack-texture.png",
+  "assets/attack-mode-icon.svg",
+  "assets/attack-mode-icon.png",
+  "audio/attack-transform.ogg",
+  "audio/kitt-2000-nominal.ogg",
+  "audio/kitt-2000-turbo.ogg",
+  "audio/kitt-2000-collision.ogg",
+  "audio/kitt-3000-nominal.ogg",
+  "audio/kitt-3000-turbo.ogg",
+  "audio/kitt-3000-collision.ogg",
+  "audio/kitt-2000-property-damage.ogg",
+  "audio/kitt-2000-inadvisable.ogg",
+  "audio/kitt-3000-driving-strategy.ogg",
+  "audio/kitt-3000-threat-assessment.ogg",
+  "audio/kitt-3000-enjoying-this.ogg",
+}) do
+  local handle = assert(io.open(path, "rb"))
+  handle:close()
+end
 local main = assert(io.open("main.lua", "rb")):read("*a")
 assert(main:find("movement%.collision"))
 assert(main:find("getTime%(%) %* 4"))
-assert(main:find("ctx%.voxel%.seams%(false%)"))
-assert(main:find("ctx%.voxel%.glass%(false%)"))
-assert(main:find("heightScale = mode == \"KR2008\" and 1%.3767 or 1"))
+assert(not main:find("ctx%.voxel%.seams%(", 1))
+assert(not main:find("ctx%.voxel%.glass%(", 1))
+assert(main:find("heightScale = %(mode == \"KR2008\" or mode == \"KR2008Attack\"%) and 1%.3767 or 1"))
 assert(not main:find("wheel%.inset"))
 assert(main:find("ctx%.draw%(model%.scannerMesh, texture, scannerMatrix, 0, scannerMatrix%)"))
 assert(main:find("ctx%.pass ~= \"scene\""))
@@ -113,7 +152,33 @@ assert(not main:find("key = \"threeD\""))
 assert(not main:find("assets/kitt%.png"))
 assert(not main:find("local label = mode == \"Original\" and \"KITT 2000\""))
 assert(main:find("if player%.inputLocked then return false end"))
+assert(main:find("toggleKarrMode", 1, true))
+assert(main:find("KARR_SCANNER_FILE", 1, true))
+assert(main:find("local lastVoiceFiles = {}", 1, true))
+assert(main:find("candidate ~= last", 1, true))
+assert(main:find("local objectCrashKey", 1, true))
+assert(main:find("if objectCrashKey ~= key then", 1, true))
+assert(main:find("if crashTarget ~= false then stopCrash() end", 1, true))
+assert(main:find("playCrash(target, direction, timeToImpact, false)", 1, true))
+assert(main:find("touchreleased", 1, true))
+assert(main:find("local touchHold = carToggleTouch", 1, true))
+assert(main:find("if not touch.activated then", 1, true))
+assert(main:find("return active, 1, pulse * 0.55, 0", 1, true))
+assert(main:find("if mode == \"KR2008\" and #wheels == 0", 1, true))
+assert(main:find("if voiceSource then pcall(voiceSource.stop, voiceSource) end", 1, true))
+local attack = dofile("assets/kitt-3000-attack-model.lua")
+assert(attack.texture == true)
+assert(type(attack.vertices) == "table" and #attack.vertices % 3 == 0)
+local attackTriangles = #attack.vertices / 3
+for _, part in ipairs(attack.parts or {}) do attackTriangles = attackTriangles + #part / 3 end
+for _, wheel in ipairs(attack.wheels or {}) do attackTriangles = attackTriangles + #wheel.vertices / 3 end
+assert(attackTriangles >= 12000)
+assert(type(attack.wheels) == "table" and #attack.wheels == 4)
 local exporter = assert(io.open("tools/export_textured_model.py", "rb")):read("*a")
+assert(exporter:find("--static-wheels", 1, true))
+assert(exporter:find("--material-colors", 1, true))
+assert(exporter:find("--wheel-branch", 1, true))
+assert(exporter:find("--exclude-branch", 1, true))
 assert(exporter:find("Geom3D%.064"))
 assert(exporter:find("Geom3D%.065"))
 assert(exporter:find("Geom3D%.091"))

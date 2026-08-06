@@ -10,6 +10,7 @@ local ENGINE_FILES = {
   KR2008 = "audio/kr2008_engine.ogg",
 }
 local SCANNER_FILE = "audio/scanner.ogg"
+local KARR_SCANNER_FILE = "audio/karr-scanner.ogg"
 local WILHELM_FILE = "audio/wilhelm.ogg"
 local CRASH_FILE = "audio/car_crash.ogg"
 local CRASH_IMPACT_OFFSET = 1.66
@@ -23,12 +24,38 @@ local SKI_ACTIVATION_DELAY = 0.3
 local TURBO_ACTIVATION_DELAY = 0.18
 local TURBO_HOP_FRAMES = 36
 local TURBO_DISTANCE = 96
+local ATTACK_TRANSFORM_FILE = "audio/attack-transform.ogg"
+local ATTACK_TRANSFORM_DURATION = 5.02
+local VOICE_FILES = {
+  Original = {
+    nominal = "audio/kitt-2000-nominal.ogg",
+    turbo = "audio/kitt-2000-turbo.ogg",
+    collision = {
+      "audio/kitt-2000-collision.ogg",
+      "audio/kitt-2000-turbo.ogg",
+      "audio/kitt-2000-property-damage.ogg",
+      "audio/kitt-2000-inadvisable.ogg",
+    },
+  },
+  KR2008 = {
+    nominal = "audio/kitt-3000-nominal.ogg",
+    turbo = "audio/kitt-3000-turbo.ogg",
+    collision = {
+      "audio/kitt-3000-collision.ogg",
+      "audio/kitt-3000-turbo.ogg",
+      "audio/kitt-3000-driving-strategy.ogg",
+      "audio/kitt-3000-threat-assessment.ogg",
+      "audio/kitt-3000-enjoying-this.ogg",
+    },
+  },
+}
 local COLLISION_RADIUS = 22
 local COLLISION_HALF_WIDTH = 7
 local VOXEL_LEVEL = 4
 local MODEL_FILES = {
   Original = "assets/kitt_model.lua",
   KR2008 = "assets/mustang_model.lua",
+  KR2008Attack = "assets/kitt-3000-attack-model.lua",
 }
 local PALETTE_FILES = {
   Original = {
@@ -37,18 +64,38 @@ local PALETTE_FILES = {
     "assets/kitt_palette_2.png",
     "assets/kitt_palette_3.png",
   },
+  OriginalKarr = {
+    "assets/karr_palette_0.png",
+    "assets/karr_palette_1.png",
+    "assets/karr_palette_2.png",
+    "assets/karr_palette_3.png",
+  },
   KR2008 = "assets/mustang_texture.png",
+  KR2008Attack = "assets/kitt-3000-attack-texture.png",
 }
 local SCANNER_LIGHT_FILES = {
-  "assets/scanner_dim.png",
-  "assets/scanner_medium.png",
-  "assets/scanner_bright.png",
+  KITT = {
+    "assets/scanner_dim.png",
+    "assets/scanner_medium.png",
+    "assets/scanner_bright.png",
+  },
+  KARR2000 = {
+    "assets/karr2000_scanner_dim.png",
+    "assets/karr2000_scanner_medium.png",
+    "assets/karr2000_scanner_bright.png",
+  },
+  KARR3000 = {
+    "assets/karr3000_scanner_dim.png",
+    "assets/karr3000_scanner_medium.png",
+    "assets/karr3000_scanner_bright.png",
+  },
 }
 local CAR_ICON_FILES = {
-  Original = "assets/kitt-2000-icon.png",
-  KR2008 = "assets/kitt-3000-icon.png",
+  Original = { KITT = "assets/kitt-2000-icon.png", KARR = "assets/karr-2000-icon.png" },
+  KR2008 = { KITT = "assets/kitt-3000-icon.png", KARR = "assets/karr-3000-icon.png" },
 }
 local SKI_ICON_FILE = "assets/ski-mode-icon.png"
+local ATTACK_ICON_FILE = "assets/attack-mode-icon.png"
 local SPEED_MULTIPLIERS = {
   SLOW = 0.52,
   NORMAL = 0.42,
@@ -119,12 +166,6 @@ return function(mod)
       },
     },
     {
-      key = "skiMode",
-      label = "SKI MODE",
-      type = "toggle",
-      default = false,
-    },
-    {
       key = "impactCollision",
       label = "COLLISION",
       type = "toggle",
@@ -156,6 +197,10 @@ return function(mod)
     return optionValue("kitt", false)
   end
 
+  local function karrEnabled()
+    return kittEnabled() and optionValue("karr", false)
+  end
+
   local powerDownVisible = false
 
   local function kittVisible()
@@ -163,9 +208,27 @@ return function(mod)
   end
 
   local skiState = { amount = 0 }
+  local attackState = { transition = nil }
+  local requestAttackMode
 
   local function skiEnabled()
     return kittEnabled() and optionValue("skiMode", false)
+  end
+
+  local function attackAvailable()
+    return kittEnabled() and optionValue("audio", "Original") == "KR2008"
+  end
+
+  local function attackVisual()
+    local transition = attackState.transition
+    if not transition then
+      return optionValue("attackMode", false), 1, 0, 0
+    end
+    local now = love.timer and love.timer.getTime and love.timer.getTime() or transition.started
+    local progress = math.max(0, math.min(1, (now - transition.started) / transition.duration))
+    local active = progress >= 0.5 and transition.target or transition.from
+    local pulse = math.sin(math.pi * progress)
+    return active, 1, pulse * 0.55, 0
   end
 
   local function vehicleSpeed()
@@ -286,12 +349,6 @@ return function(mod)
       step = function(game_)
         return cycleChoice(game_, "speed", SPEED_CHOICES, "NORMAL")
       end,
-    }
-    filtered[#filtered + 1] = {
-      id = MOD_ID .. ":skiMode",
-      label = "SKI MODE",
-      value = function() return optionValue("skiMode", false) and "ON" or "OFF" end,
-      step = function(game_) return cycleBoolean(game_, "skiMode", false) end,
     }
     filtered[#filtered + 1] = {
       id = MOD_ID .. ":impactCollision",
@@ -418,6 +475,12 @@ return function(mod)
 
   local function selectedModel()
     local mode = optionValue("audio", "Original")
+    if mode == "KR2008" and attackVisual() then
+      return "KR2008Attack", MODEL_FILES.KR2008Attack
+    end
+    if mode == "Original" and karrEnabled() then
+      return "OriginalKarr", MODEL_FILES.Original
+    end
     return mode, MODEL_FILES[mode] or MODEL_FILES.Original
   end
 
@@ -450,6 +513,11 @@ return function(mod)
       voxelModels[mode] = { failure = "unable to create voxel mesh" }
       return nil
     end
+    local meshes = { mesh }
+    for _, vertices in ipairs(data.parts or {}) do
+      local partOk, part = pcall(ctx.newMesh, vertices, nil)
+      if partOk and part then meshes[#meshes + 1] = part end
+    end
     local palettes = PALETTE_FILES[mode] or PALETTE_FILES.Original
     if type(palettes) == "string" then palettes = { palettes } end
     local textures = {}
@@ -467,14 +535,20 @@ return function(mod)
       return nil
     end
     local scannerLightTextures = {}
-    if mode == "KR2008" then
-      for _, path in ipairs(SCANNER_LIGHT_FILES) do
-        local textureOk, texture = pcall(love.graphics.newImage,
-                                         mod.assets:path(path))
-        if textureOk and texture then
-          pcall(texture.setFilter, texture, "nearest", "nearest")
-          pcall(texture.setWrap, texture, "clamp", "clamp")
-          scannerLightTextures[#scannerLightTextures + 1] = texture
+    if mode == "KR2008" or mode == "KR2008Attack" or mode == "OriginalKarr" then
+      for name, files in pairs(SCANNER_LIGHT_FILES) do
+        local texturesForScanner = {}
+        for _, path in ipairs(files) do
+          local textureOk, texture = pcall(love.graphics.newImage,
+                                           mod.assets:path(path))
+          if textureOk and texture then
+            pcall(texture.setFilter, texture, "nearest", "nearest")
+            pcall(texture.setWrap, texture, "clamp", "clamp")
+            texturesForScanner[#texturesForScanner + 1] = texture
+          end
+        end
+        if #texturesForScanner == #files then
+          scannerLightTextures[name] = texturesForScanner
         end
       end
     end
@@ -485,7 +559,7 @@ return function(mod)
         wheels[#wheels + 1] = {
           center = wheel.center,
           mesh = wheelMesh,
-          heightScale = mode == "KR2008" and 1.3767 or 1,
+          heightScale = (mode == "KR2008" or mode == "KR2008Attack") and 1.3767 or 1,
         }
       end
     end
@@ -503,11 +577,12 @@ return function(mod)
       end
     end
     local model = {
+      mode = mode,
       mesh = mesh,
+      meshes = meshes,
       texture = textures[1],
       scannerTextures = textures,
-      scannerMesh = #scannerLightTextures == #SCANNER_LIGHT_FILES
-          and createScannerMesh(ctx) or nil,
+      scannerMesh = scannerLightTextures.KITT and createScannerMesh(ctx) or nil,
       scannerLightTextures = scannerLightTextures,
       skiMesh = createSkiMesh(ctx),
       wheels = wheels,
@@ -590,9 +665,11 @@ return function(mod)
         pitch = math.sin((progress - 0.75) * math.pi * 2) * 0.32
       end
     end
+    local _, scale, lift, spin = attackVisual()
     return m.mul(
-      m.translate(ctx.px + 8, ctx.ground + ctx.lift, ctx.py + 8),
-      m.mul(m.rotateY(yaw), m.mul(m.rotateX(pitch), skiTransform(m))))
+      m.translate(ctx.px + 8, ctx.ground + ctx.lift + lift, ctx.py + 8),
+      m.mul(m.rotateY(yaw + spin),
+        m.mul(m.rotateX(pitch), m.mul(m.scale(scale, scale, scale), skiTransform(m)))))
   end
 
   local function voxelWheelMatrix(ctx, wheel)
@@ -605,8 +682,13 @@ return function(mod)
   end
 
   local function drawScannerSweep(ctx, model, matrix)
+    if model.mode == "OriginalKarr" then return end
+    local scannerName = karrEnabled()
+        and (optionValue("audio", "Original") == "Original" and "KARR2000" or "KARR3000")
+        or "KITT"
+    local scannerTextures = model.scannerLightTextures[scannerName]
     if ctx.pass ~= "scene" or ctx.facing ~= "down" or not model.scannerMesh
-        or #model.scannerLightTextures ~= #SCANNER_LIGHT_FILES then
+        or not scannerTextures or #scannerTextures ~= 3 then
       return
     end
     local phase = 0
@@ -630,16 +712,16 @@ return function(mod)
       local distance = math.min(math.abs(index - active[1]),
                                 math.abs(index - active[2]))
       local intensity = 3 - math.min(2, distance)
-      local texture = model.scannerLightTextures[intensity]
+      local texture = scannerTextures[intensity]
       local scannerMatrix = m.mul(matrix,
           m.mul(m.translate(segment[1], segment[2], segment[3]),
                 m.rotateY(segment[4])))
       if flatten then
-        local glow = ({
-          { { 0.38, 0.01, 0 }, 0.9 },
-          { { 0.75, 0.04, 0.005 }, 0.96 },
-          { { 1, 0.12, 0.01 }, 1 },
-        })[intensity]
+        local colors = karrEnabled() and {
+          KARR2000 = { { 0.16, 0.24, 0 }, { 0.5, 0.72, 0.01 }, { 0.86, 1, 0.08 } },
+          KARR3000 = { { 0.48, 0.36, 0 }, { 0.84, 0.63, 0.01 }, { 1, 0.86, 0.1 } },
+        } or { KITT = { { 0.38, 0.01, 0 }, { 0.75, 0.04, 0.005 }, { 1, 0.12, 0.01 } } }
+        local glow = { colors[scannerName][intensity], ({ 0.9, 0.96, 1 })[intensity] }
         flatten(glow[1], glow[2])
       end
       ctx.draw(model.scannerMesh, texture, scannerMatrix, 0, scannerMatrix)
@@ -675,15 +757,15 @@ return function(mod)
     if not model then return false end
     updateVoxelScanner(model)
     updateVoxelWheels(model, ctx.moving)
-    pcall(model.mesh.setTexture, model.mesh, model.texture)
     local matrix = voxelModelMatrix(ctx)
-    ctx.voxel.seams(false)
-    ctx.voxel.glass(false)
-    if ctx.pass == "shadow" then
-      ctx.shadow(model.mesh, model.texture, matrix)
-    else
-      ctx.draw(model.mesh, model.texture, matrix,
-               ctx.pass == "ghost" and 0 or ctx.pull, matrix)
+    for _, mesh in ipairs(model.meshes or { model.mesh }) do
+      pcall(mesh.setTexture, mesh, model.texture)
+      if ctx.pass == "shadow" then
+        ctx.shadow(mesh, model.texture, matrix)
+      else
+        ctx.draw(mesh, model.texture, matrix,
+                 ctx.pass == "ghost" and 0 or ctx.pull, matrix)
+      end
     end
     for _, wheel in ipairs(model.wheels or {}) do
       wheel.angle = model.wheelAngle
@@ -697,8 +779,6 @@ return function(mod)
       end
     end
     drawScannerSweep(ctx, model, matrix)
-    ctx.voxel.seams(true)
-    ctx.voxel.glass(true)
     if ctx.pass == "scene" and drawExplosions then drawExplosions(ctx) end
     return true
   end
@@ -717,6 +797,8 @@ return function(mod)
     request = nil,
   }
   local clearTurbo
+  local requestObjectCollision
+  local objectCrashKey
   local function isOutdoorKittVisible(player)
     local overworld = Game.overworld
     return kittVisible() and overworld and overworld.player == player and overworld.map
@@ -741,6 +823,7 @@ return function(mod)
     local player = ctx and ctx.mover
     local map = ctx and ctx.map
     if not (player and map and isOutdoorPlayer(player)) then return result end
+    if result then objectCrashKey = nil end
     if player.__gen1KrTerrainRecovery then
       if map:isWaterCell(ctx.toX, ctx.toY) then return false end
       if map:isWalkableCell(ctx.toX, ctx.toY) then
@@ -749,7 +832,10 @@ return function(mod)
       if ctx.reason == "tile" then return true end
       return result
     end
-    if not result then return false end
+    if not result then
+      if ctx.reason == "tile" and requestObjectCollision then requestObjectCollision(ctx) end
+      return false
+    end
     return true
   end, 1000)
 
@@ -940,6 +1026,7 @@ return function(mod)
   local sourceFailures = {}
   local engineSource
   local scannerSource
+  local scannerSources = {}
   local wilhelmSource
   local crashSource
   local crashTarget
@@ -947,9 +1034,14 @@ return function(mod)
   local crashCollided
   local turboSource
   local skiSource
+  local attackTransformSource
   local powerUpSource
   local powerDownSource
   local powerDownDeadline
+  local voiceSources = {}
+  local voiceSource
+  local lastVoiceFiles = {}
+  local nextVoiceAt
   local skiRequest
   local wilhelmDelay
   local flyingNpcs = setmetatable({}, { __mode = "k" })
@@ -1002,8 +1094,6 @@ return function(mod)
   drawExplosions = function(ctx)
     local mesh, texture = explosionResources(ctx)
     if not mesh then return end
-    ctx.voxel.glass(false)
-    ctx.voxel.seams(false)
     ctx.voxel.depth("always")
     local m = ctx.mat4
     for _, burst in ipairs(explosions) do
@@ -1018,8 +1108,6 @@ return function(mod)
       end
     end
     ctx.voxel.depth("test")
-    ctx.voxel.seams(true)
-    ctx.voxel.glass(true)
   end
 
   local function updateExplosions(step)
@@ -1127,6 +1215,13 @@ return function(mod)
     return result
   end
 
+  local function stopVoice()
+    if voiceSource then pcall(voiceSource.stop, voiceSource) end
+    if love.timer and love.timer.getTime then
+      nextVoiceAt = love.timer.getTime() + 25 + math.random() * 20
+    end
+  end
+
   local function mapOverworld()
     local stack = Game.stack
     local overworld = Game.overworld
@@ -1180,9 +1275,75 @@ return function(mod)
     end
   end
 
+  local function playVoice(kind)
+    if not (kittEnabled() and liveOverworld()) or attackState.transition or karrEnabled() then
+      return false
+    end
+    if voiceSource then
+      local ok, playing = pcall(voiceSource.isPlaying, voiceSource)
+      if ok and playing then return false end
+    end
+    local mode = optionValue("audio", "Original")
+    local file = VOICE_FILES[mode] and VOICE_FILES[mode][kind]
+    if type(file) == "table" then
+      local choices = {}
+      local last = lastVoiceFiles[mode .. ":" .. kind]
+      for _, candidate in ipairs(file) do
+        if candidate ~= last then choices[#choices + 1] = candidate end
+      end
+      file = choices[math.random(#choices)]
+      lastVoiceFiles[mode .. ":" .. kind] = file
+    end
+    if not file then return false end
+    local voice = voiceSources[file]
+    if voice == nil then
+      voice = source(file, "static") or false
+      voiceSources[file] = voice
+    end
+    if not voice then return false end
+    voiceSource = voice
+    pcall(voiceSource.stop, voiceSource)
+    pcall(voiceSource.setVolume, voiceSource, 1)
+    pcall(voiceSource.play, voiceSource)
+    return true
+  end
+
+  local function scheduleVoice(now)
+    nextVoiceAt = now + 35 + math.random() * 35
+  end
+
+  local function updateVoiceChatter()
+    if not kittEnabled() then
+      nextVoiceAt = nil
+      return
+    end
+    if attackState.transition then return end
+    local overworld = liveOverworld()
+    if not overworld then return end
+    local now = love.timer and love.timer.getTime and love.timer.getTime() or 0
+    if not nextVoiceAt then
+      scheduleVoice(now)
+      return
+    end
+    if now >= nextVoiceAt then
+      playVoice("nominal")
+      scheduleVoice(now)
+    end
+  end
+
   local function playScanner()
     if not (kittEnabled() and liveOverworld()) then return end
-    scannerSource = scannerSource or source(SCANNER_FILE, "static")
+    stopVoice()
+    local file = karrEnabled() and KARR_SCANNER_FILE or SCANNER_FILE
+    local selected = scannerSources[file]
+    if selected == nil then
+      selected = source(file, "static") or false
+      scannerSources[file] = selected
+    end
+    if scannerSource and scannerSource ~= selected then
+      pcall(scannerSource.stop, scannerSource)
+    end
+    scannerSource = selected
     if scannerSource then
       pcall(scannerSource.stop, scannerSource)
       pcall(scannerSource.play, scannerSource)
@@ -1211,13 +1372,14 @@ return function(mod)
     crashCollided = nil
   end
 
-  local function playCrash(npc, direction, timeToImpact)
+  local function playCrash(npc, direction, timeToImpact, interruptVoice)
     if not (kittEnabled() and liveOverworld())
         or not optionValue("impactCollision", true) then
       return false
     end
     crashSource = crashSource or source(CRASH_FILE, "static")
     if not crashSource then return false end
+    if interruptVoice then stopVoice() end
     pcall(crashSource.stop, crashSource)
     local offset = CRASH_IMPACT_OFFSET
     if timeToImpact and timeToImpact > 0 then
@@ -1226,7 +1388,7 @@ return function(mod)
     pcall(crashSource.seek, crashSource, offset)
     pcall(crashSource.setVolume, crashSource, 1)
     pcall(crashSource.play, crashSource)
-    crashTarget = npc
+    crashTarget = npc or false
     crashDirection = direction
     crashCollided = false
     return true
@@ -1234,10 +1396,28 @@ return function(mod)
 
   local function markCrashCollision(npc, direction)
     if crashTarget ~= npc or crashDirection ~= direction or not crashPlaying() then
-      playCrash(npc, direction, 0)
+      playCrash(npc, direction, 0, true)
     end
     if crashTarget == npc and crashDirection == direction then
       crashCollided = true
+    end
+  end
+
+  local function playCollisionVoice()
+    if math.random() < 0.35 then playVoice("collision") end
+  end
+
+  local objectVoiceAt = 0
+  requestObjectCollision = function(ctx)
+    local now = love.timer and love.timer.getTime and love.timer.getTime() or 0
+    local key = table.concat({ ctx.toX or "", ctx.toY or "", ctx.dir or "" }, ":")
+    if objectCrashKey ~= key then
+      objectCrashKey = key
+      playCrash(false, ctx.dir, 0, false)
+    end
+    if now >= objectVoiceAt then
+      objectVoiceAt = now + 4
+      playCollisionVoice()
     end
   end
 
@@ -1252,6 +1432,7 @@ return function(mod)
 
   local function playSki()
     if not (kittEnabled() and liveOverworld()) then return end
+    stopVoice()
     skiSource = skiSource or source(SKI_FILE, "static")
     if skiSource then
       pcall(skiSource.stop, skiSource)
@@ -1260,8 +1441,18 @@ return function(mod)
     end
   end
 
+  local function playAttackTransform()
+    stopVoice()
+    attackTransformSource = attackTransformSource or source(ATTACK_TRANSFORM_FILE, "static")
+    if attackTransformSource then
+      pcall(attackTransformSource.stop, attackTransformSource)
+      pcall(attackTransformSource.play, attackTransformSource)
+    end
+  end
+
   local function playPowerUp()
     if optionValue("audio", "Original") ~= "Original" then return end
+    stopVoice()
     powerUpSource = powerUpSource or source(POWER_UP_FILE, "static")
     if powerUpSource then
       pcall(powerUpSource.stop, powerUpSource)
@@ -1274,6 +1465,7 @@ return function(mod)
       powerDownVisible = false
       return false
     end
+    stopVoice()
     powerDownSource = powerDownSource or source(POWER_DOWN_FILE, "static")
     if not powerDownSource then
       powerDownVisible = false
@@ -1318,6 +1510,30 @@ return function(mod)
     local game = skiRequest.game
     skiRequest = nil
     setOption(game, "skiMode", not optionValue("skiMode", false))
+  end
+
+  requestAttackMode = function(game)
+    if not attackAvailable() or attackState.transition then return false end
+    local now = love.timer and love.timer.getTime and love.timer.getTime() or 0
+    setOption(game, "skiMode", false)
+    stopVoice()
+    attackState.transition = {
+      from = optionValue("attackMode", false),
+      target = not optionValue("attackMode", false),
+      started = now,
+      duration = ATTACK_TRANSFORM_DURATION,
+    }
+    playAttackTransform()
+    return true
+  end
+
+  local function updateAttackMode(game)
+    local transition = attackState.transition
+    if not transition then return end
+    local now = love.timer and love.timer.getTime and love.timer.getTime() or transition.started
+    if now - transition.started < transition.duration then return end
+    attackState.transition = nil
+    setOption(game, "attackMode", transition.target)
   end
 
   clearTurbo = function()
@@ -1435,7 +1651,7 @@ return function(mod)
       return
     end
     if not player.moving then
-      stopCrash()
+      if crashTarget ~= false then stopCrash() end
       return
     end
     local speed = playerSpeed(player)
@@ -1456,11 +1672,11 @@ return function(mod)
       end
     end
     if not target then
-      stopCrash()
+      if crashTarget ~= false then stopCrash() end
       return
     end
     if crashTarget ~= target or crashDirection ~= direction or not crashPlaying() then
-      playCrash(target, direction, timeToImpact)
+      playCrash(target, direction, timeToImpact, false)
     end
   end
 
@@ -1496,6 +1712,7 @@ return function(mod)
     spawnExplosion(overworld, npc)
     pcall(require("src.core.Sound").play, Game.data, "Collision")
     markCrashCollision(npc, direction)
+    playCollisionVoice()
     wilhelmDelay = 0.42
   end
 
@@ -1563,9 +1780,13 @@ return function(mod)
   end
 
   local carToggleRect
+  local carToggleTouch
+  local carToggleKeyStarted
   local carIcons = {}
   local skiToggleRect
+  local attackToggleRect
   local skiIcon
+  local attackIcon
 
   local function carButtonGeometry(width, height)
     local buttonW = math.min(72, math.max(56, math.floor(height * 0.1)))
@@ -1616,22 +1837,55 @@ return function(mod)
     }
   end
 
+  local function attackButtonGeometry(width, height)
+    local controls = Game.touchControls
+    local layout = controls and controls.layout and controls:layout()
+    local a = layout and layout.a
+    if a then
+      local size = math.max(24, math.min(36, math.floor(a.w * 0.42)))
+      local centerX = a.cx - a.w * 0.62
+      local centerY = a.cy - a.w * 0.72
+      return {
+        drawX = centerX - size / 2,
+        drawY = centerY - size / 2,
+        x = centerX - size / 2 - 10,
+        y = centerY - size / 2 - 10,
+        w = size + 20,
+        h = size + 20,
+        size = size,
+      }
+    end
+    local size = math.max(24, math.min(36, math.floor(math.min(width, height) * 0.07)))
+    return {
+      drawX = width - size * 4.2,
+      drawY = height - size * 3.2,
+      x = width - size * 4.2 - 10,
+      y = height - size * 3.2 - 10,
+      w = size + 20,
+      h = size + 20,
+      size = size,
+    }
+  end
+
   local function mobilePlatform()
     local osName = love.system and love.system.getOS and love.system.getOS()
     return osName == "iOS" or osName == "Android"
   end
 
   local function loadCarIcon(mode)
-    local cached = carIcons[mode]
+    local variant = karrEnabled() and "KARR" or "KITT"
+    local key = mode .. variant
+    local cached = carIcons[key]
     if cached ~= nil then return cached or nil end
-    local path = CAR_ICON_FILES[mode] or CAR_ICON_FILES.Original
+    local files = CAR_ICON_FILES[mode] or CAR_ICON_FILES.Original
+    local path = files[variant]
     local ok, image = pcall(love.graphics.newImage, mod.assets:path(path))
     if ok and image then
       pcall(image.setFilter, image, "linear", "linear")
-      carIcons[mode] = image
+      carIcons[key] = image
       return image
     end
-    carIcons[mode] = false
+    carIcons[key] = false
     return nil
   end
 
@@ -1648,33 +1902,59 @@ return function(mod)
     return nil
   end
 
+  local function loadAttackIcon()
+    if attackIcon ~= nil then return attackIcon or nil end
+    local ok, image = pcall(love.graphics.newImage,
+                            mod.assets:path(ATTACK_ICON_FILE))
+    if ok and image then
+      pcall(image.setFilter, image, "linear", "linear")
+      attackIcon = image
+      return image
+    end
+    attackIcon = false
+    return nil
+  end
+
   local function toggleCarMode(game)
     local current = optionValue("audio", "Original")
     setOption(game, "audio", current == "Original" and "KR2008" or "Original")
+    playScanner()
+  end
+
+  local function toggleKarrMode(game)
+    setOption(game, "karr", not optionValue("karr", false))
+    playScanner()
   end
 
   mod.hooks:wrap("render.hud", function(next, game, viewport)
     next(game, viewport)
     if not (mobilePlatform() and kittEnabled() and liveOverworld()) then
       carToggleRect = nil
+      carToggleTouch = nil
       skiToggleRect = nil
+      attackToggleRect = nil
       return
     end
     local width = (viewport and viewport.width) or love.graphics.getWidth()
     local height = (viewport and viewport.height) or love.graphics.getHeight()
     local geometry = carButtonGeometry(width, height)
     local skiGeometry = skiButtonGeometry(width, height)
+    local attackGeometry = attackButtonGeometry(width, height)
     local x, y = geometry.drawX, geometry.drawY
     carToggleRect = geometry
     local mode = optionValue("audio", "Original")
     local image = loadCarIcon(mode)
     love.graphics.push("all")
     love.graphics.origin()
-    love.graphics.setColor(0.04, 0.05, 0.07, 0.62)
+    love.graphics.setColor(0.04, 0.05, 0.07, 0.32)
     love.graphics.rectangle("fill", x, y, geometry.width, geometry.height, 10, 10)
+    love.graphics.setColor(0.9, 0.94, 1, 0.34)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", x + 0.5, y + 0.5, geometry.width - 1,
+                            geometry.height - 1, 9, 9)
     if image then
-      local scale = math.min((geometry.width - 2) / image:getWidth(),
-                             (geometry.height - 2) / image:getHeight())
+      local scale = math.min(geometry.width / image:getWidth(),
+                             geometry.height / image:getHeight())
       local drawW = image:getWidth() * scale
       local drawH = image:getHeight() * scale
       love.graphics.setColor(1, 1, 1, 1)
@@ -1703,6 +1983,31 @@ return function(mod)
         skiGeometry.drawY + (skiGeometry.size - icon:getHeight() * scale) / 2,
         0, scale, scale)
     end
+    if attackAvailable() then
+      attackToggleRect = attackGeometry
+      love.graphics.setColor(0.12, 0.04, 0.04, 0.75)
+      love.graphics.circle("fill", attackGeometry.drawX + attackGeometry.size / 2,
+                           attackGeometry.drawY + attackGeometry.size / 2,
+                           attackGeometry.size / 2)
+      if attackVisual() then
+        love.graphics.setColor(1, 0.3, 0.3, 0.9)
+        love.graphics.setLineWidth(2)
+        love.graphics.circle("line", attackGeometry.drawX + attackGeometry.size / 2,
+                             attackGeometry.drawY + attackGeometry.size / 2,
+                             attackGeometry.size / 2 - 1)
+      end
+      local attack = loadAttackIcon()
+      if attack then
+        local scale = (attackGeometry.size * 0.62) / math.max(attack:getWidth(), attack:getHeight())
+        love.graphics.setColor(1, 1, 1, 0.95)
+        love.graphics.draw(attack,
+          attackGeometry.drawX + (attackGeometry.size - attack:getWidth() * scale) / 2,
+          attackGeometry.drawY + (attackGeometry.size - attack:getHeight() * scale) / 2,
+          0, scale, scale)
+      end
+    else
+      attackToggleRect = nil
+    end
     love.graphics.pop()
   end, 1000)
 
@@ -1718,6 +2023,16 @@ return function(mod)
         skiToggleRect = skiButtonGeometry(love.graphics.getWidth(),
                                            love.graphics.getHeight())
       end
+      if attackAvailable() and not attackToggleRect then
+        attackToggleRect = attackButtonGeometry(love.graphics.getWidth(),
+                                                 love.graphics.getHeight())
+      end
+      local attack = attackToggleRect
+      if attack and x >= attack.x and x <= attack.x + attack.w
+          and y >= attack.y and y <= attack.y + attack.h then
+        requestAttackMode(self)
+        return
+      end
       local ski = skiToggleRect
       if x >= ski.x and x <= ski.x + ski.w and y >= ski.y and y <= ski.y + ski.h then
         requestSkiMode(self)
@@ -1725,11 +2040,28 @@ return function(mod)
       end
       local r = carToggleRect
       if x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h then
-        toggleCarMode(self)
+        carToggleTouch = {
+          id = id,
+          started = love.timer and love.timer.getTime and love.timer.getTime() or 0,
+        }
         return
       end
     end
     return baseTouchpressed(self, id, x, y)
+  end
+
+  local baseTouchreleased = Game.__gen1KrBaseTouchreleased or Game.touchreleased
+  Game.__gen1KrBaseTouchreleased = baseTouchreleased
+  function Game:touchreleased(id, x, y)
+    local touch = carToggleTouch
+    if touch and touch.id == id then
+      carToggleTouch = nil
+      if not touch.activated then
+        toggleCarMode(self)
+      end
+      return
+    end
+    return baseTouchreleased(self, id, x, y)
   end
 
   mod.hooks:wrap("music.select", function(next, chosen, ctx)
@@ -1748,6 +2080,18 @@ return function(mod)
     local scannerPressed = false
     local turboPressed = false
     local input = game and game.input
+    local keyHold = carToggleKeyStarted
+    if keyHold and not keyHold.activated and love.timer and love.timer.getTime
+        and love.timer.getTime() - keyHold.started >= 0.5 then
+      toggleKarrMode(game)
+      keyHold.activated = true
+    end
+    local touchHold = carToggleTouch
+    if touchHold and not touchHold.activated and love.timer and love.timer.getTime
+        and love.timer.getTime() - touchHold.started >= 0.5 then
+      toggleKarrMode(game)
+      touchHold.activated = true
+    end
     for _, button in ipairs(input and input.pressQueue or {}) do
       if button == "a" then
         scannerPressed = true
@@ -1760,9 +2104,11 @@ return function(mod)
     local result = next(game, dt)
     updateSkiRequest(dt)
     updateSkiState(dt)
+    updateAttackMode(game)
     updatePowerDown()
     if kittEnabled() and scannerPressed then playScanner() end
     updateEngine()
+    updateVoiceChatter()
     updateCollisions(dt)
     return result
   end)
@@ -1780,16 +2126,41 @@ return function(mod)
       return
     end
     if kittEnabled() and liveOverworld() and key == "c" then
-      local current = optionValue("audio", "Original")
-      setOption(self, "audio", current == "Original" and "KR2008" or "Original")
+      if not carToggleKeyStarted then
+        carToggleKeyStarted = {
+          started = love.timer and love.timer.getTime and love.timer.getTime() or 0,
+          activated = false,
+        }
+      end
       return
     end
     if kittEnabled() and liveOverworld() and key == "s" then
       requestSkiMode(self)
       return
     end
+    if kittEnabled() and liveOverworld() and key == "x" then
+      requestAttackMode(self)
+      return
+    end
     local result = baseKeypressed(self, key)
     return result
+  end
+
+  local baseKeyreleased = Game.__gen1KrBaseKeyreleased or Game.keyreleased
+  Game.__gen1KrBaseKeyreleased = baseKeyreleased
+  function Game:keyreleased(key)
+    if key == "c" and carToggleKeyStarted then
+      local hold = carToggleKeyStarted
+      carToggleKeyStarted = nil
+      local now = love.timer and love.timer.getTime and love.timer.getTime() or hold.started
+      if kittEnabled() and liveOverworld() then
+        if not hold.activated and now - hold.started < 0.5 then
+          toggleCarMode(self)
+        end
+        return
+      end
+    end
+    return baseKeyreleased(self, key)
   end
 
   mod.events:on("mod.options_changed", function(payload)
@@ -1800,10 +2171,13 @@ return function(mod)
       stopEngine()
       clearTurbo()
       skiRequest = nil
+      attackState.transition = nil
       stopCrash()
       if scannerSource then pcall(scannerSource.stop, scannerSource) end
       if turboSource then pcall(turboSource.stop, turboSource) end
       if skiSource then pcall(skiSource.stop, skiSource) end
+      if attackTransformSource then pcall(attackTransformSource.stop, attackTransformSource) end
+      stopVoice()
       if payload.value then
         powerDownVisible = false
         powerDownDeadline = nil
@@ -1824,6 +2198,10 @@ return function(mod)
       return
     end
     if payload.key ~= "audio" then return end
+    if payload.value ~= "KR2008" then
+      attackState.transition = nil
+      setOption(Game, "attackMode", false)
+    end
     stopEngine()
     local overworld = mapOverworld()
     if overworld then
