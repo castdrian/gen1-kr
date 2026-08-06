@@ -19,6 +19,10 @@ local SKI_FILE = "audio/ski_mode.ogg"
 local POWER_UP_FILE = "audio/power_up.ogg"
 local POWER_DOWN_FILE = "audio/power_down.ogg"
 local POWER_DOWN_DURATION = 3.35
+local SKI_ACTIVATION_DELAY = 0.3
+local TURBO_ACTIVATION_DELAY = 0.18
+local TURBO_HOP_FRAMES = 36
+local TURBO_DISTANCE = 96
 local COLLISION_RADIUS = 22
 local COLLISION_HALF_WIDTH = 7
 local VOXEL_LEVEL = 4
@@ -172,7 +176,7 @@ return function(mod)
   local function updateSkiState(dt)
     local target = skiEnabled() and 1 or 0
     local amount = skiState.amount
-    local step = math.max(0, math.min(1, (dt or 1 / 60) * 5.5))
+    local step = math.max(0, math.min(1, (dt or 1 / 60) * 4))
     skiState.amount = amount + (target - amount) * step
   end
 
@@ -578,7 +582,14 @@ return function(mod)
     local player = Game.overworld and Game.overworld.player
     local progress = player == turbo.player and player.progress
       and math.max(0, math.min(1, player.progress / math.max(1, player.stepFramesCur or 1))) or 0
-    local pitch = player == turbo.player and -math.cos(math.pi * progress) * 0.32 or 0
+    local pitch = 0
+    if player == turbo.player then
+      if progress < 0.25 then
+        pitch = -math.cos(progress * math.pi * 2) * 0.32
+      elseif progress > 0.75 then
+        pitch = math.sin((progress - 0.75) * math.pi * 2) * 0.32
+      end
+    end
     return m.mul(
       m.translate(ctx.px + 8, ctx.ground + ctx.lift, ctx.py + 8),
       m.mul(m.rotateY(yaw), m.mul(m.rotateX(pitch), skiTransform(m))))
@@ -1296,7 +1307,7 @@ return function(mod)
     if not kittEnabled() then return false end
     if skiRequest then return false end
     playSki()
-    skiRequest = { game = game, remaining = 0.18 }
+    skiRequest = { game = game, remaining = SKI_ACTIVATION_DELAY }
     return true
   end
 
@@ -1336,7 +1347,7 @@ return function(mod)
       overworld = overworld,
       map = overworld.map,
       direction = turboDirection(input, player),
-      remaining = 0.18,
+      remaining = TURBO_ACTIVATION_DELAY,
     }
     playTurbo()
   end
@@ -1367,7 +1378,7 @@ return function(mod)
     player.turnTimer = 0
     local delta = Collision.DELTA[direction]
     local originX, originY = player.px, player.py
-    local distance = 64
+    local distance = TURBO_DISTANCE
     local targetX = math.floor((originX + delta[1] * distance + 8) / 16)
     local targetY = math.floor((originY + delta[2] * distance + 8) / 16)
     if not overworld.map:inBounds(targetX, targetY) then
@@ -1385,8 +1396,8 @@ return function(mod)
     player.targetX, player.targetY = targetX, targetY
     player.moving = true
     player.progress = 0
-    player.stepFramesCur = 24
-    player.hopFrames, player.hopTotal = 24, 24
+    player.stepFramesCur = TURBO_HOP_FRAMES
+    player.hopFrames, player.hopTotal = TURBO_HOP_FRAMES, TURBO_HOP_FRAMES
     return true
   end
 
@@ -1662,8 +1673,8 @@ return function(mod)
     love.graphics.setColor(0.04, 0.05, 0.07, 0.62)
     love.graphics.rectangle("fill", x, y, geometry.width, geometry.height, 10, 10)
     if image then
-      local scale = math.min((geometry.width - 8) / image:getWidth(),
-                             (geometry.height - 8) / image:getHeight())
+      local scale = math.min((geometry.width - 2) / image:getWidth(),
+                             (geometry.height - 2) / image:getHeight())
       local drawW = image:getWidth() * scale
       local drawH = image:getHeight() * scale
       love.graphics.setColor(1, 1, 1, 1)
