@@ -791,8 +791,12 @@ return function(mod)
     local texture = model.laserTexture
     if not texture then return end
     local m = ctx.mat4
+    local originY, originZ = 4.95, 18.64
+    if model.mode == "Original" or model.mode == "OriginalKarr" then
+      originY, originZ = 6, 17.5
+    end
     local beamMatrix = m.mul(matrix,
-      m.translate(0, 4.1, 20.62))
+      m.translate(0, originY, originZ))
     pcall(model.laserMesh.setTexture, model.laserMesh, texture)
     local flatten = ctx.voxel.flatten
     ctx.voxel.depth("always")
