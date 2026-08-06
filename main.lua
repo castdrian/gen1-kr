@@ -785,7 +785,7 @@ return function(mod)
     if not texture then return end
     local m = ctx.mat4
     local beamMatrix = m.mul(matrix,
-      m.mul(m.translate(0, 4.9, 18), m.rotateY(math.pi)))
+      m.translate(0, 4.9, 18))
     pcall(model.laserMesh.setTexture, model.laserMesh, texture)
     ctx.draw(model.laserMesh, texture, beamMatrix, 0, beamMatrix)
   end
