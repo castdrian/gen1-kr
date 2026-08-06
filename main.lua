@@ -16,6 +16,7 @@ local CRASH_FILE = "audio/car_crash.ogg"
 local CRASH_IMPACT_OFFSET = 1.66
 local CRASH_PRE_ROLL = 0.75
 local TURBO_FILE = "audio/turbo.ogg"
+local LASER_FILE = "audio/laser.ogg"
 local SKI_FILE = "audio/ski_mode.ogg"
 local POWER_UP_FILE = "audio/power_up.ogg"
 local POWER_DOWN_FILE = "audio/power_down.ogg"
@@ -208,6 +209,7 @@ return function(mod)
   end
 
   local skiState = { amount = 0 }
+  local laserState = { held = false, active = false }
   local attackState = { transition = nil }
   local requestAttackMode
 
@@ -473,6 +475,34 @@ return function(mod)
     return ok and mesh or nil
   end
 
+  local function createLaserMesh(ctx)
+    local halfWidth, halfHeight, depth = 0.28, 0.16, 144
+    local vertices = {}
+    local function vertex(x, y, z, u, v)
+      return { x, y, z, u, v, 1 }
+    end
+    local function face(a, b, c, d)
+      vertices[#vertices + 1] = a
+      vertices[#vertices + 1] = b
+      vertices[#vertices + 1] = c
+      vertices[#vertices + 1] = a
+      vertices[#vertices + 1] = c
+      vertices[#vertices + 1] = d
+    end
+    local left, right = -halfWidth, halfWidth
+    local bottom, top = -halfHeight, halfHeight
+    face(vertex(left, bottom, 0, 0, 0), vertex(right, bottom, 0, 1, 0),
+         vertex(right, top, 0, 1, 1), vertex(left, top, 0, 0, 1))
+    face(vertex(right, bottom, depth, 0, 0), vertex(left, bottom, depth, 1, 0),
+         vertex(left, top, depth, 1, 1), vertex(right, top, depth, 0, 1))
+    face(vertex(left, top, 0, 0, 0), vertex(right, top, 0, 1, 0),
+         vertex(right, top, depth, 1, 1), vertex(left, top, depth, 0, 1))
+    face(vertex(left, bottom, depth, 0, 0), vertex(right, bottom, depth, 1, 0),
+         vertex(right, bottom, 0, 1, 1), vertex(left, bottom, 0, 0, 1))
+    local ok, mesh = pcall(ctx.newMesh, vertices, nil)
+    return ok and mesh or nil
+  end
+
   local function selectedModel()
     local mode = optionValue("audio", "Original")
     if mode == "KR2008" and attackVisual() then
@@ -583,6 +613,7 @@ return function(mod)
       texture = textures[1],
       scannerTextures = textures,
       scannerMesh = scannerLightTextures.KITT and createScannerMesh(ctx) or nil,
+      laserMesh = scannerLightTextures.KITT and createLaserMesh(ctx) or nil,
       scannerLightTextures = scannerLightTextures,
       skiMesh = createSkiMesh(ctx),
       wheels = wheels,
@@ -747,6 +778,18 @@ return function(mod)
     end
   end
 
+  local function drawLaserBeam(ctx, model, matrix)
+    if ctx.pass ~= "scene" or not laserState.active or not model.laserMesh then return end
+    local textures = model.scannerLightTextures and model.scannerLightTextures.KITT
+    local texture = textures and textures[3]
+    if not texture then return end
+    local m = ctx.mat4
+    local beamMatrix = m.mul(matrix,
+      m.mul(m.translate(0, 4.9, -18), m.rotateY(math.pi)))
+    pcall(model.laserMesh.setTexture, model.laserMesh, texture)
+    ctx.draw(model.laserMesh, texture, beamMatrix, 0, beamMatrix)
+  end
+
   local drawExplosions
 
   local function drawVoxelModel(ctx)
@@ -779,6 +822,7 @@ return function(mod)
       end
     end
     drawScannerSweep(ctx, model, matrix)
+    drawLaserBeam(ctx, model, matrix)
     if ctx.pass == "scene" and drawExplosions then drawExplosions(ctx) end
     return true
   end
@@ -1033,6 +1077,7 @@ return function(mod)
   local crashDirection
   local crashCollided
   local turboSource
+  local laserSource
   local activeTurboSources = {}
   local skiSource
   local attackTransformSource
@@ -1433,6 +1478,19 @@ return function(mod)
     activeTurboSources[#activeTurboSources + 1] = effect
   end
 
+  local function updateLaserAudio(active)
+    if not active then
+      if laserSource then pcall(laserSource.stop, laserSource) end
+      return
+    end
+    laserSource = laserSource or source(LASER_FILE, "static")
+    if not laserSource then return end
+    pcall(laserSource.setLooping, laserSource, true)
+    pcall(laserSource.setVolume, laserSource, 1)
+    local ok, playing = pcall(laserSource.isPlaying, laserSource)
+    if not ok or not playing then pcall(laserSource.play, laserSource) end
+  end
+
   local function updateTurboAudio()
     for index = #activeTurboSources, 1, -1 do
       local effect = activeTurboSources[index]
@@ -1727,6 +1785,22 @@ return function(mod)
     wilhelmDelay = 0.42
   end
 
+  local function updateLaser()
+    local overworld = liveOverworld()
+    local player = overworld and overworld.player
+    laserState.active = kittEnabled() and laserState.held and player ~= nil
+    updateLaserAudio(laserState.active)
+    if not laserState.active then return end
+    local direction = player.facing
+    if not direction then return end
+    for _, npc in ipairs(overworld.npcs or {}) do
+      local forward, lateral = collisionOffset(player, npc, direction)
+      if forward >= -4 and forward <= 152 and lateral <= 7 then
+        launchNpc(npc, direction)
+      end
+    end
+  end
+
   local function updateCollisions(dt)
     local overworld = liveOverworld()
     local step = dt or 1 / 60
@@ -1796,6 +1870,8 @@ return function(mod)
   local carIcons = {}
   local skiToggleRect
   local attackToggleRect
+  local laserToggleRect
+  local laserTouch
   local skiIcon
   local attackIcon
 
@@ -1878,6 +1954,36 @@ return function(mod)
     }
   end
 
+  local function laserButtonGeometry(width, height)
+    local controls = Game.touchControls
+    local layout = controls and controls.layout and controls:layout()
+    local a = layout and layout.a
+    if a then
+      local size = math.max(24, math.min(34, math.floor(a.w * 0.4)))
+      local centerX = a.cx - a.w * 0.66
+      local centerY = a.cy + a.w * 0.42
+      return {
+        drawX = centerX - size / 2,
+        drawY = centerY - size / 2,
+        x = centerX - size / 2 - 10,
+        y = centerY - size / 2 - 10,
+        w = size + 20,
+        h = size + 20,
+        size = size,
+      }
+    end
+    local size = math.max(24, math.min(34, math.floor(math.min(width, height) * 0.065)))
+    return {
+      drawX = width - size * 5.25,
+      drawY = height - size * 2.25,
+      x = width - size * 5.25 - 10,
+      y = height - size * 2.25 - 10,
+      w = size + 20,
+      h = size + 20,
+      size = size,
+    }
+  end
+
   local function mobilePlatform()
     local osName = love.system and love.system.getOS and love.system.getOS()
     return osName == "iOS" or osName == "Android"
@@ -1944,6 +2050,9 @@ return function(mod)
       carToggleTouch = nil
       skiToggleRect = nil
       attackToggleRect = nil
+      laserToggleRect = nil
+      laserTouch = nil
+      laserState.held = false
       return
     end
     local width = (viewport and viewport.width) or love.graphics.getWidth()
@@ -1951,6 +2060,7 @@ return function(mod)
     local geometry = carButtonGeometry(width, height)
     local skiGeometry = skiButtonGeometry(width, height)
     local attackGeometry = attackButtonGeometry(width, height)
+    local laserGeometry = laserButtonGeometry(width, height)
     local x, y = geometry.drawX, geometry.drawY
     carToggleRect = geometry
     local mode = optionValue("audio", "Original")
@@ -2019,6 +2129,21 @@ return function(mod)
     else
       attackToggleRect = nil
     end
+    laserToggleRect = laserGeometry
+    love.graphics.setColor(0.12, 0.04, 0.04, 0.75)
+    love.graphics.circle("fill", laserGeometry.drawX + laserGeometry.size / 2,
+                         laserGeometry.drawY + laserGeometry.size / 2,
+                         laserGeometry.size / 2)
+    love.graphics.setColor(1, 0.28, 0.2, laserState.active and 1 or 0.86)
+    love.graphics.setLineWidth(2)
+    local laserX = laserGeometry.drawX + laserGeometry.size / 2
+    local laserY = laserGeometry.drawY + laserGeometry.size / 2
+    love.graphics.line(laserX - laserGeometry.size * 0.28, laserY,
+                       laserX + laserGeometry.size * 0.28, laserY)
+    love.graphics.line(laserX - laserGeometry.size * 0.08, laserY - laserGeometry.size * 0.16,
+                       laserX + laserGeometry.size * 0.28, laserY)
+    love.graphics.line(laserX - laserGeometry.size * 0.08, laserY + laserGeometry.size * 0.16,
+                       laserX + laserGeometry.size * 0.28, laserY)
     love.graphics.pop()
   end, 1000)
 
@@ -2038,6 +2163,10 @@ return function(mod)
         attackToggleRect = attackButtonGeometry(love.graphics.getWidth(),
                                                  love.graphics.getHeight())
       end
+      if not laserToggleRect then
+        laserToggleRect = laserButtonGeometry(love.graphics.getWidth(),
+                                              love.graphics.getHeight())
+      end
       local attack = attackToggleRect
       if attack and x >= attack.x and x <= attack.x + attack.w
           and y >= attack.y and y <= attack.y + attack.h then
@@ -2047,6 +2176,13 @@ return function(mod)
       local ski = skiToggleRect
       if x >= ski.x and x <= ski.x + ski.w and y >= ski.y and y <= ski.y + ski.h then
         requestSkiMode(self)
+        return
+      end
+      local laser = laserToggleRect
+      if laser and x >= laser.x and x <= laser.x + laser.w
+          and y >= laser.y and y <= laser.y + laser.h then
+        laserTouch = id
+        laserState.held = true
         return
       end
       local r = carToggleRect
@@ -2064,6 +2200,11 @@ return function(mod)
   local baseTouchreleased = Game.__gen1KrBaseTouchreleased or Game.touchreleased
   Game.__gen1KrBaseTouchreleased = baseTouchreleased
   function Game:touchreleased(id, x, y)
+    if laserTouch == id then
+      laserTouch = nil
+      laserState.held = false
+      return
+    end
     local touch = carToggleTouch
     if touch and touch.id == id then
       carToggleTouch = nil
@@ -2113,6 +2254,7 @@ return function(mod)
     if kittEnabled() and turboPressed then requestTurbo(input) end
     startTurbo(dt)
     updateTurboAudio()
+    updateLaser()
     local result = next(game, dt)
     updateSkiRequest(dt)
     updateSkiState(dt)
@@ -2128,6 +2270,10 @@ return function(mod)
   local baseKeypressed = Game.__gen1KrBaseKeypressed or Game.keypressed
   Game.__gen1KrBaseKeypressed = baseKeypressed
   function Game:keypressed(key)
+    if kittEnabled() and liveOverworld() and key == "l" then
+      laserState.held = true
+      return
+    end
     if kittEnabled() and liveOverworld() and key == "space" then
       requestTurbo(self.input)
       return
@@ -2161,6 +2307,10 @@ return function(mod)
   local baseKeyreleased = Game.__gen1KrBaseKeyreleased or Game.keyreleased
   Game.__gen1KrBaseKeyreleased = baseKeyreleased
   function Game:keyreleased(key)
+    if key == "l" then
+      laserState.held = false
+      return
+    end
     if key == "c" and carToggleKeyStarted then
       local hold = carToggleKeyStarted
       carToggleKeyStarted = nil
@@ -2187,6 +2337,9 @@ return function(mod)
       stopCrash()
       if scannerSource then pcall(scannerSource.stop, scannerSource) end
       if turboSource then pcall(turboSource.stop, turboSource) end
+      if laserSource then pcall(laserSource.stop, laserSource) end
+      laserState.held = false
+      laserState.active = false
       for _, effect in ipairs(activeTurboSources) do pcall(effect.stop, effect) end
       activeTurboSources = {}
       if skiSource then pcall(skiSource.stop, skiSource) end
