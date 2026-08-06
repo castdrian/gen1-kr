@@ -785,7 +785,7 @@ return function(mod)
     if not texture then return end
     local m = ctx.mat4
     local beamMatrix = m.mul(matrix,
-      m.mul(m.translate(0, 4.9, -18), m.rotateY(math.pi)))
+      m.mul(m.translate(0, 4.9, 18), m.rotateY(math.pi)))
     pcall(model.laserMesh.setTexture, model.laserMesh, texture)
     ctx.draw(model.laserMesh, texture, beamMatrix, 0, beamMatrix)
   end
@@ -2052,7 +2052,7 @@ return function(mod)
       attackToggleRect = nil
       laserToggleRect = nil
       laserTouch = nil
-      laserState.held = false
+      if not (kittEnabled() and liveOverworld()) then laserState.held = false end
       return
     end
     local width = (viewport and viewport.width) or love.graphics.getWidth()
