@@ -113,7 +113,7 @@ return function(mod)
   local Player = require("src.world.Player")
   local SpriteRenderer = require("src.render.SpriteRenderer")
   local Pipelines = require("src.render.Pipelines")
-  local externalVoxel = mod:find("DRAMATIC_SHAPE")
+  local externalVoxel = mod:find("DRAMALESS_SHAPE")
   local VoxelScene
   local Voxel3D
   local VoxelState

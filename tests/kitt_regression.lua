@@ -11,9 +11,9 @@ local function jsonDependencies(body)
 end
 
 local manifest = read("manifest.json")
-assert(jsonDependencies(manifest):find("DRAMATIC_SHAPE", 1, true))
+assert(jsonDependencies(manifest):find("DRAMALESS_SHAPE", 1, true))
 assert(jsonDependencies(manifest):find(">=1.6.0 <2.0.0", 1, true))
-assert(not manifest:find('"conflicts"%s*:%s*%[%s*"DRAMATIC_SHAPE"'))
+assert(not manifest:find('"conflicts"%s*:%s*%[%s*"DRAMALESS_SHAPE"'))
 
 local originalRequire = require
 local modules = {
@@ -55,7 +55,7 @@ local function drawCast() drawEntity() end
 local function render() drawShadow() drawGhost() drawCast() end
 local scene = { render = render }
 local external = {
-  id = "DRAMATIC_SHAPE",
+  id = "DRAMALESS_SHAPE",
   version = "1.6.0",
   exports = {
     version = "1.6.0",
@@ -105,7 +105,7 @@ local mod = {
   assets = { path = function(_, path) return path end },
   read = function() return nil end,
   find = function(_, id)
-    if id == "DRAMATIC_SHAPE" then return external end
+    if id == "DRAMALESS_SHAPE" then return external end
   end,
   log = { warn = function() end },
 }
