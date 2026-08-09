@@ -1,7 +1,7 @@
 {
   "id": "gen1_kr",
   "name": "Gen1 KR",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -9,7 +9,7 @@
   "game_version": "0.0.0-dev || >=0.1.37 <2.0.0",
   "priority": 100,
   "permissions": ["engine_internals"],
-  "dependencies": ["DRAMALESS_SHAPE@>=1.6.0 <2.0.0"],
+  "dependencies": ["DRAMALESS_SHAPE@>=1.6.3 <2.0.0"],
   "optional_dependencies": [],
   "conflicts": [],
   "description": "Drive KITT across Kanto.",

@@ -12,7 +12,7 @@ end
 
 local manifest = read("manifest.json")
 assert(jsonDependencies(manifest):find("DRAMALESS_SHAPE", 1, true))
-assert(jsonDependencies(manifest):find(">=1.6.0 <2.0.0", 1, true))
+assert(jsonDependencies(manifest):find(">=1.6.3 <2.0.0", 1, true))
 assert(not manifest:find('"conflicts"%s*:%s*%[%s*"DRAMALESS_SHAPE"'))
 
 local originalRequire = require
