@@ -11,6 +11,9 @@ local function jsonDependencies(body)
 end
 
 local manifest = read("manifest.json")
+assert(manifest:find('"id": "recomp-rider"', 1, true))
+assert(manifest:find('"version": "0.4.0"', 1, true))
+assert(manifest:find('"games": ["gen1", "gen2"]', 1, true))
 assert(jsonDependencies(manifest):find("DRAMALESS_SHAPE", 1, true))
 assert(jsonDependencies(manifest):find(">=1.6.3 <2.0.0", 1, true))
 assert(not manifest:find('"conflicts"%s*:%s*%[%s*"DRAMALESS_SHAPE"'))
@@ -25,7 +28,6 @@ local modules = {
   },
   ["src.world.Map"] = { isOutdoor = function() return true end },
   ["src.core.Music"] = { playMap = function() end },
-  ["src.world.Player"] = { pose = function() end, update = function() end },
   ["src.render.SpriteRenderer"] = { new = function() return {} end },
   ["src.render.Pipelines"] = {
     maxLevel = function() return 4 end,
@@ -43,7 +45,6 @@ package.loaded["src.core.Game"] = modules["src.core.Game"]
 package.loaded["src.world.Collision"] = modules["src.world.Collision"]
 package.loaded["src.world.Map"] = modules["src.world.Map"]
 package.loaded["src.core.Music"] = modules["src.core.Music"]
-package.loaded["src.world.Player"] = modules["src.world.Player"]
 package.loaded["src.render.SpriteRenderer"] = modules["src.render.SpriteRenderer"]
 package.loaded["src.render.Pipelines"] = modules["src.render.Pipelines"]
 
@@ -69,9 +70,9 @@ local external = {
 }
 
 local mod = {
-  id = "gen1_kr",
-  path = "mods/gen1_kr",
-  manifest = { version = "0.1.1" },
+  id = "recomp-rider",
+  path = "mods/recomp-rider",
+  manifest = { version = "0.4.0" },
   content = {
     sprites = { register = function() end },
     music = { register = function() end },
@@ -133,14 +134,14 @@ local kittItem = startItems[1]
 assert(kittItem.label == "KITT OFF")
 kittItem.onSelect()
 assert(kittItem.label == "KITT ON")
-assert(menuGame.save.options.modOptions.gen1_kr.kitt == true)
+assert(menuGame.save.options.modOptions["recomp-rider"].kitt == true)
 settings.kitt = true
 
 local rows = hooks["ui.options.rows"](function(_, value) return value end,
   { save = { options = {} }, mods = { modOptions = {} } }, {})
 local speed
 for _, row in ipairs(rows) do
-  if row.id == "gen1_kr:speed" then speed = row break end
+  if row.id == "recomp-rider:speed" then speed = row break end
 end
 assert(speed and speed.value() == "NORMAL")
 local speedPlayer = { surfing = false, fishing = false }
@@ -165,6 +166,8 @@ assert(not source:find("m.rotateX(skiState.amount", 1, true))
 assert(source:find("POWER_UP_FILE", 1, true))
 assert(source:find("POWER_DOWN_FILE", 1, true))
 assert(source:find("POWER_DOWN_DURATION", 1, true))
+assert(read("assets/laser-icon.svg"):find("viewBox", 1, true))
+assert(source:find("LASER_ICON_FILE", 1, true))
 assert(source:find("TURBO_HOP_FRAMES = 36", 1, true))
 assert(source:find("TURBO_DISTANCE = 96", 1, true))
 assert(source:find("SKI_ACTIVATION_DELAY = 0.3", 1, true))
@@ -183,4 +186,4 @@ assert(not source:find("assets/kitt.png", 1, true))
 assert(source:find('ctx.facing ~= "down"', 1, true))
 assert(source:find('ctx.voxel.depth("always")', 1, true))
 
-print("gen1 kr regression ok")
+print("recomp rider regression ok")

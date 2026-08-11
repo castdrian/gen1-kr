@@ -5,7 +5,7 @@ mod_dir=$(cd "$(dirname "$0")/.." && pwd)
 engine_repo=${GEN1RECOMP_REPO:-"$mod_dir/../gen1recomp"}
 
 if [ ! -f "$engine_repo/tools/modkit.py" ]; then
-  printf '%s\n' "gen1-kr pre-commit: set GEN1RECOMP_REPO to the engine checkout" >&2
+  printf '%s\n' "recomp-rider pre-commit: set GEN1RECOMP_REPO to the engine checkout" >&2
   exit 1
 fi
 
@@ -13,7 +13,7 @@ cd "$engine_repo"
 if ! validation=$(python3 tools/modkit.py validate "$mod_dir" --strict 2>&1); then
   printf '%s\n' "$validation" >&2
   errors=$(printf '%s\n' "$validation" | grep -c '^MK[0-9][0-9][0-9] ERROR ' || true)
-  if [ "$errors" -ne 1 ] || ! printf '%s\n' "$validation" | grep -Eq '^MK003 ERROR gen1_kr: missing dependency: (DRAMATIC_SHAPE|DRAMALESS_SHAPE)$'; then
+  if [ "$errors" -ne 1 ] || ! printf '%s\n' "$validation" | grep -Eq '^MK003 ERROR recomp-rider: missing dependency: (DRAMATIC_SHAPE|DRAMALESS_SHAPE)$'; then
     exit 1
   fi
 fi

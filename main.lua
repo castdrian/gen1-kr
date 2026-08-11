@@ -1,8 +1,8 @@
-local MOD_ID = "gen1_kr"
+local MOD_ID = "recomp-rider"
 
 local MUSIC = {
-  Original = { id = "Music_Gen1KR_Original", file = "audio/original.ogg" },
-  KR2008 = { id = "Music_Gen1KR_KR2008", file = "audio/kr2008.ogg" },
+  Original = { id = "Music_RecompRider_Original", file = "audio/original.ogg" },
+  KR2008 = { id = "Music_RecompRider_KR2008", file = "audio/kr2008.ogg" },
 }
 
 local ENGINE_FILES = {
@@ -98,6 +98,7 @@ local CAR_ICON_FILES = {
 }
 local SKI_ICON_FILE = "assets/ski-mode-icon.png"
 local ATTACK_ICON_FILE = "assets/attack-mode-icon.png"
+local LASER_ICON_FILE = "assets/laser-icon.png"
 local SPEED_MULTIPLIERS = {
   SLOW = 0.52,
   NORMAL = 0.42,
@@ -110,7 +111,6 @@ return function(mod)
   local Collision = require("src.world.Collision")
   local Map = require("src.world.Map")
   local Music = require("src.core.Music")
-  local Player = require("src.world.Player")
   local SpriteRenderer = require("src.render.SpriteRenderer")
   local Pipelines = require("src.render.Pipelines")
   local externalVoxel = mod:find("DRAMALESS_SHAPE")
@@ -175,7 +175,7 @@ return function(mod)
     },
   }
   mod.options:define(ownOptions)
-  mod.exports.version = mod.manifest and mod.manifest.version or "0.4.23"
+  mod.exports.version = mod.manifest and mod.manifest.version or "0.4.0"
   mod.exports.cameraLevel = VOXEL_LEVEL
   mod.exports.collision = {
     radius = COLLISION_RADIUS,
@@ -845,10 +845,6 @@ return function(mod)
     return true
   end
 
-  local vanillaPose = Player.__gen1KrVanillaPose or Player.pose
-  Player.__gen1KrVanillaPose = vanillaPose
-  local vanillaUpdate = Player.__gen1KrVanillaUpdate or Player.update
-  Player.__gen1KrVanillaUpdate = vanillaUpdate
   local kittSprites = setmetatable({}, { __mode = "k" })
   turbo = {
     player = nil,
@@ -863,8 +859,10 @@ return function(mod)
   local objectCrashKey
   local function isOutdoorKittVisible(player)
     local overworld = Game.overworld
+    local playerState = overworld and overworld.playerState
     return kittVisible() and overworld and overworld.player == player and overworld.map
        and Map.isOutdoor(overworld.map.def)
+       and playerState ~= "surf" and playerState ~= "surf_pika"
        and not player.surfing and not player.fishing
   end
 
@@ -912,7 +910,91 @@ return function(mod)
     return sprite
   end
 
+  local playerHooks = setmetatable({}, { __mode = "k" })
+
+  local function installPlayerHooks(player)
+    if not player or playerHooks[player] then return end
+    local vanillaPose = player.pose
+    local vanillaUpdate = player.update
+    local vanillaDraw = player.draw
+    if type(vanillaPose) ~= "function" and type(vanillaDraw) ~= "function"
+        and type(vanillaUpdate) ~= "function" then
+      return
+    end
+    local hook = {
+      pose = vanillaPose,
+      update = vanillaUpdate,
+      draw = vanillaDraw,
+    }
+    playerHooks[player] = hook
+    if type(vanillaPose) == "function" then
+      player.pose = function(self)
+        local sprite, px, py, facing, phase, flip, hopping = hook.pose(self)
+        if isOutdoorKittVisible(self) then
+          if turbo.player == self then
+            local progress = math.max(0, math.min(1,
+              (self.progress or 0) / math.max(1, self.stepFramesCur or 1)))
+            py = py - math.floor(math.sin(math.pi * progress) * 12)
+            hopping = true
+          end
+          local replacement = kittSprite(self, sprite)
+          if replacement then
+            return replacement, px, py, facing, phase, flip, hopping
+          end
+        end
+        return sprite, px, py, facing, phase, flip, hopping
+      end
+    end
+    if type(vanillaUpdate) == "function" then
+      player.update = function(self)
+        if turbo.player == self and self.moving then
+          self.stepLanded = false
+          if self.hopFrames and self.hopFrames > 0 then
+            self.hopFrames = self.hopFrames - 1
+          end
+          self.progress = self.progress + 1
+          self.animClock = (self.animClock or 0) + 1
+          local stepLength = self.stepFramesCur or 1
+          local delta = Collision.DELTA[self.facing]
+          local pixels = math.floor(self.progress * turbo.distance / stepLength)
+          self.px = (turbo.originX or self.cellX * 16) + delta[1] * pixels
+          self.py = (turbo.originY or self.cellY * 16) + delta[2] * pixels
+          if self.progress < stepLength then return false end
+          self.cellX, self.cellY = self.targetX, self.targetY
+          self.targetX, self.targetY = nil, nil
+          self.px, self.py = self.cellX * 16, self.cellY * 16
+          self.moving = false
+          self.stepFlip = not self.stepFlip
+          self.stepLanded = true
+          local landedMap = turbo.map
+          self.__gen1KrTerrainRecovery = landedMap
+              and not landedMap:isWaterCell(self.cellX, self.cellY)
+              and not landedMap:isWalkableCell(self.cellX, self.cellY) or nil
+          clearTurbo()
+          return true
+        end
+        return hook.update(self)
+      end
+    end
+    if type(vanillaDraw) == "function" and type(vanillaPose) ~= "function" then
+      player.draw = function(self, ...)
+        if isOutdoorKittVisible(self) and self.sprite then
+          local original = self.sprite
+          local replacement = kittSprite(self, original)
+          if replacement then
+            self.sprite = replacement
+            local ok, result = pcall(hook.draw, self, ...)
+            self.sprite = original
+            if ok then return result end
+          end
+        end
+        return hook.draw(self, ...)
+      end
+    end
+  end
+
   local externalVoxelInstalled = false
+  local externalVoxelUnregister
   local rawShadowDraw
 
   local function kittSpriteDef(sprite)
@@ -923,7 +1005,8 @@ return function(mod)
                                  ground, colors, lift, moving)
     local player = Game.overworld and Game.overworld.player
     local bodyFacing = kittSpriteDef(sprite) and player and player.facing or facing
-    local angle = VoxelState and VoxelState.angle or 0.05
+    local angle = ctx.angle or (ctx.voxel and ctx.voxel.angle)
+      or (VoxelState and VoxelState.angle) or 0.05
     return {
       pass = pass,
       sprite = sprite,
@@ -1016,6 +1099,22 @@ return function(mod)
 
   local function installExternalVoxel()
     if externalVoxelInstalled then return true end
+    local exports = externalVoxel and externalVoxel.exports
+    local registerEntityModel = exports and exports.registerEntityModel
+    if type(registerEntityModel) == "function" then
+      local ok, unregister = pcall(registerEntityModel, MOD_ID,
+        function(context)
+          if not (context and kittVisible() and kittSpriteDef(context.sprite)) then
+            return false
+          end
+          return drawVoxelModel(context)
+        end, 1000)
+      if ok then
+        externalVoxelUnregister = unregister
+        externalVoxelInstalled = true
+        return true
+      end
+    end
     if not loadExternalVoxel() then return false end
     local drawCast = findUpvalue(VoxelScene.render, "drawCast")
     originalDrawEntity = drawCast and replaceUpvalue(drawCast, "drawEntity",
@@ -1036,54 +1135,6 @@ return function(mod)
 
   mod.events:on("mods.loaded", installExternalVoxel)
   installExternalVoxel()
-
-  Player.pose = function(self)
-    local sprite, px, py, facing, phase, flip, hopping = vanillaPose(self)
-    if isOutdoorKittVisible(self) then
-      if turbo.player == self then
-        local progress = math.max(0, math.min(1,
-          (self.progress or 0) / math.max(1, self.stepFramesCur or 1)))
-        py = py - math.floor(math.sin(math.pi * progress) * 12)
-        hopping = true
-      end
-      local replacement = kittSprite(self, sprite)
-      if replacement then
-        return replacement, px, py, facing, phase, flip, hopping
-      end
-    end
-    return sprite, px, py, facing, phase, flip, hopping
-  end
-
-  Player.update = function(self)
-    if turbo.player == self and self.moving then
-      self.stepLanded = false
-      if self.hopFrames and self.hopFrames > 0 then
-        self.hopFrames = self.hopFrames - 1
-      end
-      self.progress = self.progress + 1
-      self.animClock = (self.animClock or 0) + 1
-      local stepLength = self.stepFramesCur or 1
-      local delta = Collision.DELTA[self.facing]
-      local pixels = math.floor(self.progress * turbo.distance / stepLength)
-      self.px = (turbo.originX or self.cellX * 16) + delta[1] * pixels
-      self.py = (turbo.originY or self.cellY * 16) + delta[2] * pixels
-      if self.progress < stepLength then return false end
-      self.cellX, self.cellY = self.targetX, self.targetY
-      self.targetX, self.targetY = nil, nil
-      self.px, self.py = self.cellX * 16, self.cellY * 16
-      self.moving = false
-      self.stepFlip = not self.stepFlip
-      self.stepLanded = true
-      local landedMap = turbo.map
-      self.__gen1KrTerrainRecovery = landedMap
-          and not landedMap:isWaterCell(self.cellX, self.cellY)
-          and not landedMap:isWalkableCell(self.cellX, self.cellY) or nil
-      clearTurbo()
-      return true
-    end
-    local landed = vanillaUpdate(self)
-    return landed
-  end
 
   local sourceFailures = {}
   local engineSource
@@ -1292,6 +1343,7 @@ return function(mod)
     if not (stack and overworld and overworld.map and overworld.player) then
       return nil
     end
+    installPlayerHooks(overworld.player)
     for _, state in ipairs(stack.states or {}) do
       if state and state.isWideBattleLayout then return nil end
     end
@@ -1304,7 +1356,9 @@ return function(mod)
 
   local function liveOverworld()
     local overworld = mapOverworld()
-    if not overworld or Game.stack:top() ~= overworld then return nil end
+    if not overworld then return nil end
+    local top = Game.stack and Game.stack.top and Game.stack:top()
+    if top and top ~= overworld and not top.isOverworld then return nil end
     return overworld
   end
 
@@ -1892,6 +1946,7 @@ return function(mod)
   local laserTouch
   local skiIcon
   local attackIcon
+  local laserIcon
 
   local function carButtonGeometry(width, height)
     local buttonW = math.min(72, math.max(56, math.floor(height * 0.1)))
@@ -2050,6 +2105,19 @@ return function(mod)
     return nil
   end
 
+  local function loadLaserIcon()
+    if laserIcon ~= nil then return laserIcon or nil end
+    local ok, image = pcall(love.graphics.newImage,
+                            mod.assets:path(LASER_ICON_FILE))
+    if ok and image then
+      pcall(image.setFilter, image, "linear", "linear")
+      laserIcon = image
+      return image
+    end
+    laserIcon = false
+    return nil
+  end
+
   local function toggleCarMode(game)
     local current = optionValue("audio", "Original")
     setOption(game, "audio", current == "Original" and "KR2008" or "Original")
@@ -2152,16 +2220,27 @@ return function(mod)
     love.graphics.circle("fill", laserGeometry.drawX + laserGeometry.size / 2,
                          laserGeometry.drawY + laserGeometry.size / 2,
                          laserGeometry.size / 2)
-    love.graphics.setColor(1, 0.28, 0.2, laserState.active and 1 or 0.86)
-    love.graphics.setLineWidth(2)
-    local laserX = laserGeometry.drawX + laserGeometry.size / 2
-    local laserY = laserGeometry.drawY + laserGeometry.size / 2
-    love.graphics.line(laserX - laserGeometry.size * 0.28, laserY,
-                       laserX + laserGeometry.size * 0.28, laserY)
-    love.graphics.line(laserX - laserGeometry.size * 0.08, laserY - laserGeometry.size * 0.16,
-                       laserX + laserGeometry.size * 0.28, laserY)
-    love.graphics.line(laserX - laserGeometry.size * 0.08, laserY + laserGeometry.size * 0.16,
-                       laserX + laserGeometry.size * 0.28, laserY)
+    local laser = loadLaserIcon()
+    if laser then
+      local scale = (laserGeometry.size * 0.76)
+        / math.max(laser:getWidth(), laser:getHeight())
+      love.graphics.setColor(1, 1, 1, laserState.active and 1 or 0.9)
+      love.graphics.draw(laser,
+        laserGeometry.drawX + (laserGeometry.size - laser:getWidth() * scale) / 2,
+        laserGeometry.drawY + (laserGeometry.size - laser:getHeight() * scale) / 2,
+        0, scale, scale)
+    else
+      love.graphics.setColor(1, 0.28, 0.2, laserState.active and 1 or 0.86)
+      love.graphics.setLineWidth(2)
+      local laserX = laserGeometry.drawX + laserGeometry.size / 2
+      local laserY = laserGeometry.drawY + laserGeometry.size / 2
+      love.graphics.line(laserX - laserGeometry.size * 0.28, laserY,
+                         laserX + laserGeometry.size * 0.28, laserY)
+      love.graphics.line(laserX - laserGeometry.size * 0.08, laserY - laserGeometry.size * 0.16,
+                         laserX + laserGeometry.size * 0.28, laserY)
+      love.graphics.line(laserX - laserGeometry.size * 0.08, laserY + laserGeometry.size * 0.16,
+                         laserX + laserGeometry.size * 0.28, laserY)
+    end
     love.graphics.pop()
   end, 1000)
 
@@ -2396,6 +2475,9 @@ return function(mod)
   end)
 
   mod.events:on("game.ready", function(payload)
-    setVoxelMode(payload and payload.game or Game)
+    local game = payload and payload.game or Game
+    local overworld = game and game.overworld
+    installPlayerHooks(overworld and overworld.player)
+    setVoxelMode(game)
   end)
 end

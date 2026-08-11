@@ -154,7 +154,7 @@ def atlas_regions(materials, path, material_colors=False):
         for x in range(cell):
             offset = ((y0 + y) * width + x0 + x) * 4
             pixels[offset:offset + 4] = (0.8, 0.01, 0.01, 1.0)
-    atlas = bpy.data.images.new("gen1_kr_mustang_atlas", width, height, alpha=True)
+    atlas = bpy.data.images.new("recomp_rider_mustang_atlas", width, height, alpha=True)
     atlas.pixels = pixels
     atlas.filepath_raw = str(path)
     atlas.file_format = "PNG"

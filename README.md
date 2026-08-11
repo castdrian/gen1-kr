@@ -1,8 +1,8 @@
-# Gen1 KR
+# Recomp Rider
 
-Drive KITT across Kanto.
+Drive KITT across the Pokémon world.
 
-Enable K.I.T.T. from the in-game menu, then drive KITT across Kanto in voxel mode.
+Enable K.I.T.T. from the in-game menu, then drive KITT in voxel mode.
 
 ## Controls
 
@@ -17,4 +17,4 @@ On touch devices, use the car, ski, and attack controls beside the game buttons.
 
 Download the latest release and import the package through the gen1recomp mod manager.
 
-Enable submission checks with `git config core.hooksPath .githooks`.
+Run `python3 tools/modkit.py validate . --strict` before submitting.

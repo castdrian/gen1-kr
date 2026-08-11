@@ -1,17 +1,18 @@
 {
-  "id": "gen1_kr",
-  "name": "Gen1 KR",
-  "version": "0.3.2",
+  "id": "recomp-rider",
+  "name": "Recomp Rider",
+  "version": "0.4.0",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
   "category": "AUDIO",
+  "games": ["gen1", "gen2"],
   "game_version": "0.0.0-dev || >=0.1.37 <2.0.0",
   "priority": 100,
   "permissions": ["engine_internals"],
   "dependencies": ["DRAMALESS_SHAPE@>=1.6.3 <2.0.0"],
   "optional_dependencies": [],
   "conflicts": [],
-  "description": "Drive KITT across Kanto.",
-  "github": "castdrian/gen1-kr"
+  "description": "Drive KITT across the Pokémon world.",
+  "github": "castdrian/recomp-rider"
 }

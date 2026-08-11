@@ -94,7 +94,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          staging="$RUNNER_TEMP/gen1-kr"
+          staging="$RUNNER_TEMP/recomp-rider"
           out="$GITHUB_WORKSPACE/dist"
           rm -rf "$staging" "$out"
           mkdir -p "$staging" "$out"
@@ -111,10 +111,10 @@ jobs:
               json.dump(manifest, handle, indent=2, ensure_ascii=False)
               handle.write("\n")
           PY
-          package="$out/gen1-kr-${VERSION}.zip"
+          package="$out/recomp-rider-${VERSION}.zip"
           (cd "$staging" && zip -qr "$package" .)
           unzip -p "$package" manifest.json | python3 -c 'import json,sys; assert json.load(sys.stdin)["version"] == sys.argv[1]' "$VERSION"
-          (cd "$out" && sha256sum "gen1-kr-${VERSION}.zip" > sha256sums.txt)
+          (cd "$out" && sha256sum "recomp-rider-${VERSION}.zip" > sha256sums.txt)
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -127,4 +127,4 @@ jobs:
           changes="$(git log --no-merges --pretty='- %s' "$range" | head -50 || true)"
           notes="Install the zip from the gen1recomp mod manager."
           if [ -n "$changes" ]; then notes="$notes\n\n$changes"; fi
-          gh release create "$TAG" --target "$GITHUB_SHA" --title "$VERSION" --notes "$notes" "dist/gen1-kr-${VERSION}.zip" dist/sha256sums.txt
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$VERSION" --notes "$notes" "dist/recomp-rider-${VERSION}.zip" dist/sha256sums.txt
